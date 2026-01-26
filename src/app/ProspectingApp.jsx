@@ -19,26 +19,29 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bookmark,
-  BookmarkCheck,
-  ChevronRight,
   ExternalLink,
-  Globe,
   Loader2,
   Map as MapIcon,
   MapPin,
-  MessageSquare,
   Navigation,
-  Percent,
-  Plus,
   Search,
-  Sparkles,
-  Target,
-  TrendingUp,
   Trophy,
-  UserCheck,
-  Utensils,
+  Bookmark,
+  TrendingUp,
 } from "lucide-react";
+
+// Components
+import TabButton from "../components/buttons/TabButton";
+import SaveButton from "../components/buttons/SaveButton";
+import ListItemButton from "../components/buttons/ListItemButton";
+import SearchForm from "../components/cards/SearchForm";
+import SavedAccountsHeader from "../components/cards/SavedAccountsHeader";
+import ForecastCard from "../components/cards/ForecastCard";
+import AIIntelPanel from "../components/cards/AIIntelPanel";
+import VolumeAdjuster from "../components/cards/VolumeAdjuster";
+import ActivityLog from "../components/cards/ActivityLog";
+import PersonalMetrics from "../components/cards/PersonalMetrics";
+import { formatCurrency, getFullAddress } from "../utils/formatters";
 
 import {
   Bar,
@@ -57,9 +60,12 @@ const TOTAL_FIELD = "total_receipts";
 const TEXAS_CENTER = [31.0, -100.0];
 
 const VENUE_TYPES = {
-  casual_dining: { label: "Casual Dining", alcoholPct: 0.15, foodPct: 0.85, desc: "15% Alcohol" },
-  fine_dining: { label: "Fine Dining", alcoholPct: 0.25, foodPct: 0.75, desc: "25% Alcohol" },
-  bar_heavy: { label: "Bar/Nightclub", alcoholPct: 0.70, foodPct: 0.30, desc: "70% Alcohol" },
+  fine_dining: { label: "Fine Dining", alcoholPct: 0.35, foodPct: 0.65, desc: "65% Food / 35% Alcohol" },
+  casual_dining: { label: "Casual Dining", alcoholPct: 0.25, foodPct: 0.75, desc: "75% Food / 25% Alcohol" },
+  pub_grill: { label: "Pub / Grill", alcoholPct: 0.45, foodPct: 0.55, desc: "55% Food / 45% Alcohol" },
+  sports_bar: { label: "Sports Bar", alcoholPct: 0.55, foodPct: 0.45, desc: "45% Food / 55% Alcohol" },
+  dive_bar: { label: "Dive Bar / Tavern", alcoholPct: 0.90, foodPct: 0.10, desc: "10% Food / 90% Alcohol" },
+  no_food: { label: "No Food", alcoholPct: 1.0, foodPct: 0.0, desc: "0% Food / 100% Alcohol" },
 };
 
 const GPV_TIERS = [
@@ -97,16 +103,6 @@ function monthLabelFromDate(d) {
   }
 }
 
-function formatCurrency(val) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0 }).format(val);
-}
-
-function getFullAddress(info) {
-  const parts = [info.location_address, info.location_city].filter(Boolean);
-  if (parts.length) return parts.join(", ") + ", TX";
-  return "Texas";
-}
-
 function pseudoLatLng(seed) {
   const hash = String(seed || "0").split("").reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
   const lat = 29.0 + ((hash & 0xffff) / 0xffff) * 4.0;
@@ -129,16 +125,39 @@ function parseAiSections(text) {
   };
 }
 
+function parseSavedNotes(raw) {
+  const s = (raw || "").toString();
+  try {
+    const p = JSON.parse(s);
+    return {
+      key: (p?.key || p?.key?.toString() || "").replace(/^KEY:/, "") || (p?.key ? p.key : undefined),
+      notes: Array.isArray(p?.notes) ? p.notes : [],
+      history: Array.isArray(p?.history) ? p.history : [],
+      gpvTier: p?.gpvTier ?? null,
+      activeOpp: p?.activeOpp ?? false,
+      venueType: p?.venueType || null,
+      raw: p,
+    };
+  } catch (e) {
+    const m = s.match(/KEY:([^\s",}]+)/);
+    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, venueType: null, raw: s };
+  }
+}
+
 // -------------------- Component --------------------
 export default function ProspectingApp() {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
 
-  const [viewMode, setViewMode] = useState("search"); // search | top | saved
+  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics
   const [savedSubView, setSavedSubView] = useState("list"); // list | map
 
   const [searchTerm, setSearchTerm] = useState("");
   const [cityFilter, setCityFilter] = useState("");
   const [topCitySearch, setTopCitySearch] = useState("");
+
+  // Personal Metrics from Google Sheets
+  const [metricsData, setMetricsData] = useState(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
 
   const [results, setResults] = useState([]);
   const [topAccounts, setTopAccounts] = useState([]);
@@ -156,7 +175,6 @@ export default function ProspectingApp() {
   // AI
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState("");
-  const [aiQuestion, setAiQuestion] = useState("");
 
   // Notes (client only in this version)
   const [currentNote, setCurrentNote] = useState("");
@@ -186,6 +204,27 @@ export default function ProspectingApp() {
     };
     fetchSaved();
   }, []);
+
+  // ---------- Load Personal Metrics ----------
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      if (viewMode !== "metrics") return;
+      if (metricsData) return; // already loaded
+      
+      setMetricsLoading(true);
+      try {
+        const res = await fetch("/api/sheets", { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed to fetch metrics");
+        const json = await res.json();
+        setMetricsData(json || {});
+      } catch (err) {
+        console.error("Error loading metrics:", err);
+      } finally {
+        setMetricsLoading(false);
+      }
+    };
+    fetchMetrics();
+  }, [viewMode, metricsData]);
 
   // ---------- Search ----------
   const handleSearch = async (e) => {
@@ -387,6 +426,12 @@ export default function ProspectingApp() {
         return;
       }
 
+      // Require venue type to be selected before saving a new account
+      if (!venueType) {
+        setError("Please select an Account Type before saving this account.");
+        return;
+      }
+
       // Determine notes to persist only if the current notesOwner matches this account
       const notesToPersist = (notesOwner?.id && Number(notesOwner.id) === Number(info.id)) || (notesOwner?.key && notesOwner.key === key)
         ? notesList
@@ -398,7 +443,7 @@ export default function ProspectingApp() {
         lat,
         lng,
         // store key + optional notes/history and GPV tier in the notes field
-        notes: JSON.stringify({ key: `KEY:${key}`, notes: Array.isArray(notesToPersist) ? notesToPersist : [], history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], gpvTier: selectedGpvTier, activeOpp: selectedActiveOpp }),
+        notes: JSON.stringify({ key: `KEY:${key}`, notes: Array.isArray(notesToPersist) ? notesToPersist : [], history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], gpvTier: selectedGpvTier, activeOpp: selectedActiveOpp, venueType: venueType }),
       };
 
       const res = await fetch("/api/accounts", {
@@ -438,29 +483,21 @@ export default function ProspectingApp() {
     // Try to parse notes directly from the saved row (covers rows saved with JSON notes)
     try {
       const parsed = parseSavedNotes(saved.notes);
-      // Always restore GPV tier and Active Opp flag from saved payload if present
+      // Always restore GPV tier, Active Opp flag, and venue type from saved payload if present
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
-      // If notes are present in the saved JSON, use them and finish
-      if (Array.isArray(parsed.notes) && parsed.notes.length) {
-        setNotesList(parsed.notes);
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
-        return;
+      if (parsed?.venueType) {
+        setVenueType(parsed.venueType);
       }
+      // Set notes and owner, even if empty
+      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+      setNotesOwner({ id: saved.id, key: parsed.key || null });
+      return;
     } catch {}
 
-    // Fallback to the notes API which reads the DB and returns parsed.notes when present
-    try {
-      const res = await fetch(`/api/notes?accountId=${saved.id}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setNotesList(Array.isArray(data.notes) ? data.notes : []);
-      setNotesOwner({ id: saved.id, key: null });
-      setSelectedGpvTier(null);
-      setSelectedActiveOpp(false);
-    } catch {
-      // ignore
-    }
+    // Fallback only if parsing completely failed - just set empty notes without resetting other state
+    setNotesList([]);
+    setNotesOwner({ id: saved.id, key: null });
   };
 
   useEffect(() => {
@@ -511,6 +548,9 @@ export default function ProspectingApp() {
           const parsed = parseSavedNotes(refreshedRow.notes);
             setSelectedGpvTier(parsed?.gpvTier || null);
             setSelectedActiveOpp(parsed?.activeOpp || false);
+            if (parsed?.venueType) {
+              setVenueType(parsed.venueType);
+            }
         }
       } catch {}
 
@@ -555,6 +595,9 @@ export default function ProspectingApp() {
           const parsed = parseSavedNotes(refreshedRow.notes);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
+          if (parsed?.venueType) {
+            setVenueType(parsed.venueType);
+          }
         }
       } catch {}
     } catch (err) {
@@ -563,34 +606,23 @@ export default function ProspectingApp() {
   };
 
   // ---------- AI ----------
-  const performIntelligenceLookup = async (establishment, customQuestion) => {
+  const performIntelligenceLookup = async () => {
+    if (!selectedEstablishment || !selectedEstablishment.info) return;
+    
     setAiLoading(true);
+    setAiResponse("");
+    
     try {
-      const src = establishment || (selectedEstablishment && selectedEstablishment.info) || {};
-      let headerText = null;
-      let domAddr = null;
-      if (typeof document !== "undefined") {
-        try {
-          headerText = document.querySelector('h2.text-4xl')?.textContent?.trim() || null;
-          const svg = document.querySelector('svg.lucide-map-pin') || document.querySelector('svg[aria-hidden]');
-          domAddr = svg?.closest('p')?.textContent?.trim() || document.querySelector('p.text-slate-400')?.textContent?.trim() || null;
-        } catch {}
-      }
-      const acctName = headerText || src.location_name || src.name || "(unknown)";
-      const acctCity = src.location_city || src.city || "Texas";
-      const acctAddr = (domAddr && domAddr.trim()) || (searchTerm && searchTerm.trim()) || src.location_address || src.address || "";
+      const src = selectedEstablishment.info;
+      const businessName = src.location_name || src.name || "(unknown)";
+      const city = src.location_city || src.city || "Texas";
+      const taxpayer = src.taxpayer_name || businessName;
 
       const payload = {
-        name: acctName,
-        address: acctAddr,
-        city: acctCity,
-        isCustom: Boolean(customQuestion && String(customQuestion).trim()),
-        question: customQuestion ? String(customQuestion).trim() : null,
+        name: businessName,
+        city: city,
+        taxpayer: taxpayer,
       };
-
-      try {
-        console.log("Requesting /api/intel with:", payload);
-      } catch {}
 
       const resp = await fetch(`/api/intel`, {
         method: "POST",
@@ -608,48 +640,27 @@ export default function ProspectingApp() {
 
       if (!resp.ok) {
         const errMsg = bodyJson?.error || bodyJson?.body || bodyText || `Server error ${resp.status}`;
-        setAiResponse(`OWNERS: Not Found\nLOCATION COUNT: —\nACCOUNT DETAILS: ${errMsg}`);
+        setAiResponse(`Error: ${errMsg}`);
         return;
       }
 
       const text = (bodyJson && (bodyJson.text || (bodyJson.raw && bodyJson.raw?.candidates?.[0]?.content?.parts?.[0]?.text))) || "";
-
-      // Normalize output: remove question echoes and trim
-      let clean = String(text || "").trim();
-      if (customQuestion) {
-        try {
-          const q = String(customQuestion || "").trim();
-          const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          clean = clean.replace(new RegExp(esc, "gi"), "").trim();
-          clean = clean.replace(/^[:\-\s]+/, "");
-        } catch {}
-      }
-
-      // Ensure fields are present in final text; fallback if not
-      const parsed = parseAiSections(clean);
-      // force LOCATION COUNT to digits-only or '—'
-      const locDigits = (parsed.locations || "").match(/\d+/)?.[0] || "—";
-      const ownersClean = (parsed.owners || "").replace(/\n/g, ", ").replace(/\s+,/g, ",").trim() || "Not found";
-      const detailsClean = parsed.details || "—";
-
-      const final = `OWNERS: ${ownersClean}\nLOCATION COUNT: ${locDigits}\nACCOUNT DETAILS: ${detailsClean}`;
-      setAiResponse(final);
+      setAiResponse(String(text || "No response received.").trim());
     } catch (err) {
-      setAiResponse(`OWNERS: Not Found\nLOCATION COUNT: —\nACCOUNT DETAILS: ${err?.message || "AI failed"}`);
+      setAiResponse(`Error: ${err?.message || "AI request failed"}`);
     } finally {
       setAiLoading(false);
     }
   };
 
-  // ---------- Map setup ----------
-  // Auto-run AI when a new establishment is selected so the client shows
-  // OWNERS / LOCATION COUNT / ACCOUNT DETAILS immediately.
+  // Auto-trigger AI lookup when an account is selected
   useEffect(() => {
-    if (!selectedEstablishment || !selectedEstablishment.info) return;
-    // Call server-side proxy to get deterministic Gemini output
-    performIntelligenceLookup(selectedEstablishment.info);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEstablishment?.info?.taxpayer_number, selectedEstablishment?.info?.location_number]);
+    if (selectedEstablishment && selectedEstablishment.info) {
+      performIntelligenceLookup();
+    }
+  }, [selectedEstablishment]);
+
+  // ---------- Map setup ----------
 
   useEffect(() => {
     if (savedSubView !== "map") return;
@@ -772,35 +783,6 @@ export default function ProspectingApp() {
   // DELETE /api/accounts?id=... and refreshes the saved list.
 
   // ---------- Derived ----------
-  // UI-friendly account values for quick-fill buttons
-  const uiSrc = (selectedEstablishment && selectedEstablishment.info) || {};
-  const uiHeaderText = typeof document !== "undefined" ? document.querySelector('h2.text-4xl')?.textContent?.trim() : null;
-  let uiDomAddr = null;
-  if (typeof document !== "undefined") {
-    try {
-      const svg = document.querySelector('svg.lucide-map-pin') || document.querySelector('svg[aria-hidden]');
-      uiDomAddr = svg?.closest('p')?.textContent?.trim() || document.querySelector('p.text-slate-400')?.textContent?.trim() || null;
-    } catch {}
-  }
-  const displayAcctName = uiHeaderText || uiSrc.location_name || uiSrc.name || "(unknown)";
-  const displayAcctAddr = (uiDomAddr && uiDomAddr.trim()) || (searchTerm && searchTerm.trim()) || uiSrc.location_address || uiSrc.address || "";
-  const ownersPromptQuick = `OWNERS: Who owns ${displayAcctName} at ${displayAcctAddr}.`;
-  const locCountPromptQuick = `LOCATION COUNT: How many locations does ${displayAcctName} have at ${displayAcctAddr}.`;
-  const detailsPromptQuick = `ACCOUNT DETAILS: What are 2–3 brief, actionable or interesting facts I could use for prospecting ${displayAcctName} located at ${displayAcctAddr}?`;
-
-  const aiContent = useMemo(() => {
-    if (!aiResponse) return null;
-    const s = { owners: "Loading...", locations: "Checking...", details: "Parsing..." };
-    const norm = aiResponse.replace(/[*#]/g, '').trim();
-    const oM = norm.match(/OWNERS:([\s\S]*?)(?=LOCATION COUNT:|$)/i);
-    const lM = norm.match(/LOCATION COUNT:([\s\S]*?)(?=ACCOUNT DETAILS:|$)/i);
-    const dM = norm.match(/ACCOUNT DETAILS:([\s\S]*?)$/i);
-    if (oM) s.owners = oM[1].trim();
-    if (lM) s.locations = lM[1].trim();
-    if (dM) s.details = dM[1].trim();
-    return s;
-  }, [aiResponse]);
-
   const stats = useMemo(() => {
     if (!selectedEstablishment?.history?.length) return null;
     const h = selectedEstablishment.history;
@@ -815,8 +797,8 @@ export default function ProspectingApp() {
     if (!savedSearchTerm.trim()) return savedAccounts;
     const s = savedSearchTerm.toUpperCase();
     return savedAccounts.filter((a) =>
-      a.info.location_name.toUpperCase().includes(s) ||
-      a.info.location_address.toUpperCase().includes(s)
+      (a.name || "").toUpperCase().includes(s) ||
+      (a.address || "").toUpperCase().includes(s)
     );
   }, [savedAccounts, savedSearchTerm]);
 
@@ -833,9 +815,12 @@ export default function ProspectingApp() {
     if (viewMode === "saved") {
       const parsed = parseSavedNotes(data.notes);
 
-      // Always restore GPV, Active Opp and notes owner for saved items (if present)
+      // Always restore GPV, Active Opp, venue type and notes owner for saved items (if present)
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
+      if (parsed?.venueType) {
+        setVenueType(parsed.venueType);
+      }
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
       setNotesOwner({ id: data.id, key: parsed.key || null });
 
@@ -865,6 +850,9 @@ export default function ProspectingApp() {
           }
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
+          if (parsed?.venueType) {
+            setVenueType(parsed.venueType);
+          }
         return;
       }
 
@@ -911,26 +899,20 @@ export default function ProspectingApp() {
         ? data.address || ""
         : `${data.location_city || ""}${data.location_city ? ", " : ""}TX`;
 
+    const itemKey =
+      viewMode === "saved"
+        ? `${data.id || data.name}-${data.created_at || ""}`
+        : `${data.taxpayer_number}-${data.location_number}`;
+
     return (
-        <button
-          key={
-            viewMode === "saved"
-              ? `${data.id || data.name}-${data.created_at || ""}`
-              : `${data.taxpayer_number}-${data.location_number}`
-          }
-          onClick={() => handleListItemClick(item)}
-        className={`w-full text-left p-5 rounded-3xl border transition-all flex items-center justify-between group ${
-          isActive ? "bg-indigo-700 border-indigo-500 text-white" : "bg-[#1E293B] border-slate-700 hover:border-slate-500"
-        }`}
-      >
-        <div className="truncate">
-          <h4 className="font-black uppercase truncate text-sm italic tracking-tight text-slate-100">
-            {title}
-          </h4>
-          <p className="text-[9px] uppercase font-bold truncate mt-0.5 text-slate-500">{subtitle}</p>
-        </div>
-        <ChevronRight size={16} className="text-slate-600 group-hover:text-slate-300" />
-      </button>
+      <ListItemButton
+        key={itemKey}
+        itemKey={itemKey}
+        onClick={() => handleListItemClick(item)}
+        isActive={isActive}
+        title={title}
+        subtitle={subtitle}
+      />
     );
   };
 
@@ -1043,151 +1025,121 @@ export default function ProspectingApp() {
         </div>
 
         <div className="flex bg-[#1E293B] p-1.5 rounded-2xl border border-slate-700 shadow-xl overflow-hidden">
-          <button
+          <TabButton
             onClick={() => {
               setViewMode("search");
               setSavedSubView("list");
               setSelectedEstablishment(null);
               setAiResponse("");
             }}
-            className={`px-5 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest ${
-              viewMode === "search" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-            }`}
+            active={viewMode === "search"}
           >
             <Search size={14} className="inline mr-2 -mt-0.5" /> Search
-          </button>
+          </TabButton>
 
-          <button
+          <TabButton
             onClick={() => {
               setViewMode("top");
               setSavedSubView("list");
               setSelectedEstablishment(null);
               setAiResponse("");
             }}
-            className={`px-5 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest ${
-              viewMode === "top" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-            }`}
+            active={viewMode === "top"}
           >
             <Trophy size={14} className="inline mr-2 -mt-0.5" /> Leaders
-          </button>
+          </TabButton>
 
-          <button
+          <TabButton
             onClick={() => {
               setViewMode("saved");
               setSelectedEstablishment(null);
               setAiResponse("");
             }}
-            className={`px-5 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest relative ${
-              viewMode === "saved" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
-            }`}
+            active={viewMode === "saved"}
+            badge={savedAccounts.length}
           >
             <Bookmark size={14} className="inline mr-2 -mt-0.5" /> Saved
-            {savedAccounts.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-pink-500 text-[8px] text-white w-4 h-4 rounded-full flex items-center justify-center border-2 border-[#1E293B]">
-                {savedAccounts.length}
-              </span>
-            )}
-          </button>
+          </TabButton>
 
-          <button
+          <TabButton
+            onClick={() => {
+              setViewMode("metrics");
+              setSavedSubView("list");
+              setSelectedEstablishment(null);
+              setAiResponse("");
+            }}
+            active={viewMode === "metrics"}
+          >
+            <TrendingUp size={14} className="inline mr-2 -mt-0.5" /> Metrics
+          </TabButton>
+
+          <TabButton
             onClick={() => setSavedSubView(savedSubView === "map" ? "list" : "map")}
-            className={`ml-2 px-5 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest border-l border-slate-700 ${
-              savedSubView === "map" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"
-            }`}
+            active={savedSubView === "map"}
           >
             <MapIcon size={14} className="inline mr-2 -mt-0.5" />{" "}
             {savedSubView === "map" ? "Map Active" : "Show Map"}
-          </button>
+          </TabButton>
         </div>
       </header>
 
       {/* Main */}
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-12">
         {/* Left column */}
-        <aside className="lg:col-span-4 space-y-6">
-          {viewMode === "saved" ? (
-            <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-lg space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 font-black uppercase italic text-xs tracking-widest text-indigo-400">
-                  <Bookmark size={16} /> Portfolio
-                </div>
-              </div>
-
-              <input
-                type="text"
-                placeholder="Filter saved..."
-                className="w-full px-4 py-2.5 rounded-xl bg-[#0F172A] border border-slate-700 text-[10px] font-bold text-white outline-none focus:ring-1 focus:ring-indigo-600 uppercase placeholder:text-slate-600"
-                value={savedSearchTerm}
-                onChange={(e) => setSavedSearchTerm(e.target.value)}
+        {viewMode !== "metrics" && (
+          <aside className="lg:col-span-4 space-y-6">
+            {viewMode === "saved" ? (
+              <SavedAccountsHeader
+                searchTerm={savedSearchTerm}
+                onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
               />
-            </div>
-          ) : (
-            <section className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-lg">
-              <form onSubmit={viewMode === "search" ? handleSearch : handleTopSearch} className="space-y-4">
-                <div className="space-y-3">
-                  <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                    <input
-                      type="text"
-                      placeholder={viewMode === "search" ? "Business or Address..." : "City or Zip Code..."}
-                      className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-[#0F172A] border border-slate-700 text-white outline-none focus:ring-2 focus:ring-indigo-600 transition-all uppercase placeholder:text-slate-600"
-                      value={viewMode === "search" ? searchTerm : topCitySearch}
-                      onChange={(e) =>
-                        viewMode === "search"
-                          ? setSearchTerm(e.target.value.toUpperCase())
-                          : setTopCitySearch(e.target.value.toUpperCase())
-                      }
-                    />
-                  </div>
-
-                  {viewMode === "search" && (
-                    <div className="relative">
-                      <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                      <input
-                        type="text"
-                        placeholder="City Filter..."
-                        className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-[#0F172A] border border-slate-700 text-white outline-none focus:ring-2 focus:ring-indigo-600 transition-all uppercase placeholder:text-slate-600"
-                        value={cityFilter}
-                        onChange={(e) => setCityFilter(e.target.value.toUpperCase())}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl uppercase tracking-widest text-[10px] flex justify-center items-center gap-2 transition-all disabled:opacity-70"
-                >
-                  {loading ? <Loader2 className="animate-spin" size={18} /> : viewMode === "top" ? "Rank Accounts" : "Search Records"}
-                </button>
-
-                {!!error && (
-                  <div className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3">
-                    {error}
-                  </div>
-                )}
-              </form>
-            </section>
-          )}
-
-          <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
-            {listToRender.map(renderListItem)}
-            {listToRender.length === 0 && (
-              <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
-                {viewMode === "saved"
-                  ? "No saved accounts yet."
-                  : viewMode === "top"
-                  ? "Run a city or zip ranking to see leaders."
-                  : "Search for a business or address to see results."}
-              </div>
+            ) : (
+              <SearchForm
+                onSubmit={viewMode === "search" ? handleSearch : handleTopSearch}
+                searchTerm={viewMode === "search" ? searchTerm : topCitySearch}
+                onSearchChange={(e) =>
+                  viewMode === "search"
+                    ? setSearchTerm(e.target.value.toUpperCase())
+                    : setTopCitySearch(e.target.value.toUpperCase())
+                }
+                cityFilter={cityFilter}
+                onCityChange={(e) => setCityFilter(e.target.value.toUpperCase())}
+                loading={loading}
+                error={error}
+                viewMode={viewMode}
+              />
             )}
-          </div>
-        </aside>
+
+            <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
+              {listToRender.map(renderListItem)}
+              {listToRender.length === 0 && (
+                <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
+                  {viewMode === "saved"
+                    ? "No saved accounts yet."
+                    : viewMode === "top"
+                    ? "Run a city or zip ranking to see leaders."
+                    : "Search for a business or address to see results."}
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
 
         {/* Right column */}
-        <section className="lg:col-span-8">
-          {savedSubView === "map" ? (
+        <section className={viewMode === "metrics" ? "lg:col-span-12" : "lg:col-span-8"}>
+          {viewMode === "metrics" ? (
+            metricsLoading ? (
+              <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
+                <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
+                <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
+                <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
+                  Fetching data from Google Sheets...
+                </p>
+              </div>
+            ) : (
+              <PersonalMetrics data={metricsData} />
+            )
+          ) : savedSubView === "map" ? (
             <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[600px] flex flex-col">
               <div className="p-6 border-b border-slate-700 bg-slate-900/80 flex items-center justify-between z-[1000] backdrop-blur-md">
                 <div>
@@ -1247,146 +1199,30 @@ export default function ProspectingApp() {
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0">
-                    <button
+                    <SaveButton
                       onClick={toggleSaveAccount}
-                      className={`flex flex-col items-center justify-center w-16 h-16 rounded-[1.5rem] border transition-all ${
-                        isSaved(selectedEstablishment.info)
-                          ? "bg-pink-600 border-pink-500 text-white"
-                          : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
-                      }`}
-                    >
-                      {isSaved(selectedEstablishment.info) ? <BookmarkCheck size={24} /> : <Bookmark size={24} />}
-                      <span className="text-[8px] font-black uppercase mt-1">
-                        {isSaved(selectedEstablishment.info) ? "Saved" : "Save"}
-                      </span>
-                    </button>
+                      isSaved={isSaved(selectedEstablishment.info)}
+                    />
 
-                    <div className="bg-emerald-600 p-6 rounded-[2rem] shadow-xl shrink-0 min-w-[180px]">
-                      <p className="text-[9px] font-black text-emerald-100 uppercase tracking-widest mb-1 flex items-center gap-2">
-                        <TrendingUp size={12} /> Monthly Forecast
-                      </p>
-                      <p className="text-3xl font-black text-white italic tracking-tighter leading-none">
-                        {formatCurrency(stats?.total || 0)}
-                      </p>
-                    </div>
+                    <ForecastCard total={stats?.total || 0} />
                   </div>
                 </div>
 
                 {/* AI Intel Radar */}
-                <div className="bg-[#0F172A]/80 rounded-[2rem] border border-slate-700 p-8 mt-10">
-                  <div className="flex items-center gap-3 mb-8">
-                    <div className="bg-indigo-600 p-2.5 rounded-xl">
-                      {aiLoading ? (
-                        <Loader2 className="text-white animate-spin" size={20} />
-                      ) : (
-                        <Sparkles className="text-white" size={20} />
-                      )}
-                    </div>
-                    <h3 className="text-[11px] font-black uppercase italic tracking-[0.2em] text-white">
-                      AI Intel Radar
-                    </h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
-                        <button
-                          onClick={() => setAiQuestion(ownersPromptQuick)}
-                          className="flex items-center gap-2 mb-3 font-black text-[9px] text-slate-500 uppercase tracking-widest hover:opacity-80"
-                        >
-                          <UserCheck size={14} className="text-indigo-400" /> Ownership
-                        </button>
-                        <div className="h-3" />
-                    </div>
-
-                    <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
-                      <button
-                        onClick={() => setAiQuestion(locCountPromptQuick)}
-                        className="flex items-center gap-2 mb-3 font-black text-[9px] text-slate-500 uppercase tracking-widest hover:opacity-80"
-                      >
-                        <Globe size={14} className="text-emerald-400" /> Network Size
-                      </button>
-                      <div className="h-3" />
-                    </div>
-
-                    <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
-                      <button
-                        onClick={() => setAiQuestion(detailsPromptQuick)}
-                        className="flex items-center gap-2 mb-3 font-black text-[9px] text-slate-500 uppercase tracking-widest hover:opacity-80"
-                      >
-                        <Target size={14} className="text-amber-400" /> Strategy
-                      </button>
-                      <div className="h-3" />
-                    </div>
-                  </div>
-                <div className="mt-6">
-                  <textarea
-                    placeholder="Ask AI a question..."
-                    value={aiQuestion}
-                    onChange={(e) => setAiQuestion(e.target.value)}
-                    className="w-full bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[11px] font-bold text-slate-200 outline-none min-h-[70px] resize-none"
-                  />
-                  <div className="flex justify-end mt-3">
-                    <button
-                      onClick={() => {
-                        if (!aiQuestion || !aiQuestion.trim()) return;
-                        setAiResponse("");
-                        performIntelligenceLookup(null, aiQuestion).catch(() => {});
-                      }}
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-black py-2 px-4 rounded-2xl uppercase tracking-widest text-[10px]"
-                    >
-                      Ask
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-4 bg-[#071126] border border-slate-800 rounded-2xl p-4">
-                  <div className="text-[10px] font-black uppercase text-indigo-300 mb-2">Results</div>
-                  <pre className="whitespace-pre-wrap text-[11px] font-bold text-slate-200">{aiResponse || "No results yet."}</pre>
-                </div>
-                </div>
+                <AIIntelPanel
+                  aiLoading={aiLoading}
+                  aiResponse={aiResponse}
+                />
               </div>
 
               {/* Volume Adjuster + Historical Volume */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 flex flex-col">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3 font-black uppercase italic text-xs tracking-widest text-indigo-400">
-                      <Utensils size={16} /> Volume Adjuster
-                    </div>
-                    <div className="px-3 py-1 bg-slate-800 rounded-full border border-slate-700 text-[8px] font-black uppercase text-emerald-400 flex items-center gap-2 tracking-tighter">
-                      <Percent size={10} /> {VENUE_TYPES[venueType].desc}
-                    </div>
-                  </div>
-
-                  <select
-                    className="w-full bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[10px] font-black text-slate-200 uppercase outline-none mb-6 cursor-pointer"
-                    value={venueType}
-                    onChange={(e) => setVenueType(e.target.value)}
-                  >
-                    {Object.entries(VENUE_TYPES).map(([k, v]) => (
-                      <option key={k} value={k}>
-                        {v.label}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800 mt-auto">
-                    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">
-                      Est. Food Revenue
-                    </p>
-                    <p className="text-xl font-black text-white italic tracking-tighter">
-                      {formatCurrency(stats?.estFood || 0)}
-                    </p>
-                  </div>
-
-                  <div className="mt-6 bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800">
-                    <p className="text-[9px] font-black text-emerald-300 uppercase tracking-widest mb-1">
-                      Est. Alcohol Revenue
-                    </p>
-                    <p className="text-xl font-black text-white italic tracking-tighter">
-                      {formatCurrency(stats?.avgAlc || 0)}
-                    </p>
-                  </div>
-                </div>
+                <VolumeAdjuster
+                  venueTypes={VENUE_TYPES}
+                  venueType={venueType}
+                  onVenueChange={(e) => setVenueType(e.target.value)}
+                  stats={stats}
+                />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">
                   <h3 className="text-[10px] font-black uppercase italic tracking-widest text-white mb-6">
@@ -1428,86 +1264,20 @@ export default function ProspectingApp() {
               </div>
 
               {/* Notes / GPV */}
-              <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 shadow-xl">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3 font-black uppercase text-[11px] tracking-widest text-white">
-                    <MessageSquare size={18} className="text-indigo-400" /> Activity Log
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <h4 className="text-[10px] font-black uppercase italic tracking-widest text-indigo-400 mb-3">GPV Tier</h4>
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex flex-wrap gap-3">
-                      {GPV_TIERS.map((t) => (
-                        <button
-                          key={t.id}
-                          onClick={() => applyGpvTier(t.id)}
-                          className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                            selectedGpvTier === t.id ? "opacity-100 scale-100" : "opacity-70"
-                          }`}
-                          style={{ background: selectedGpvTier === t.id ? t.color : "transparent", color: selectedGpvTier === t.id ? "#fff" : t.color, borderColor: t.color }}
-                        >
-                          {t.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="ml-4">
-                      <button
-                        onClick={toggleActiveOpp}
-                        className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                          selectedActiveOpp ? "bg-emerald-500 text-white" : "opacity-70"
-                        }`}
-                        style={{ borderColor: selectedActiveOpp ? "#10b981" : "#334155" }}
-                      >
-                        Active Opp
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="relative mb-6">
-                    <textarea
-                      placeholder="Enter follow-up details..."
-                      className="w-full bg-[#0F172A] border border-slate-700 rounded-3xl p-6 text-[11px] font-bold text-slate-200 outline-none min-h-[110px] resize-none"
-                      value={currentNote}
-                      onChange={(e) => setCurrentNote(e.target.value)}
-                    />
-                    <button
-                      onClick={handleAddNote}
-                      className="absolute bottom-4 right-4 bg-indigo-600 text-white p-3 rounded-2xl shadow-xl transition-transform active:scale-95"
-                      title="Add note"
-                    >
-                      <Plus size={20} />
-                    </button>
-                  </div>
-
-                  <div className="mt-4">
-                    {notesList.length > 0 ? (
-                      <div>
-                        <div className="space-y-3 overflow-y-auto pr-2 custom-scroll" style={{ maxHeight: notesExpanded ? undefined : "10rem" }}>
-                          {(notesExpanded ? notesList : notesList.slice(0, 5)).map((n) => (
-                            <div key={n.id} className="bg-[#0F172A] p-4 rounded-2xl border border-slate-800 relative">
-                              <button onClick={() => handleDeleteNote(n.id)} title="Delete note" className="absolute right-3 top-3 text-slate-400 hover:text-rose-400">×</button>
-                              <div className="text-slate-400 text-[10px] font-bold mb-2 uppercase">{new Date(n.created_at).toLocaleString()}</div>
-                              <div className="text-slate-200 font-bold text-[11px]">{n.text}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {notesList.length > 5 && (
-                          <div className="mt-3">
-                            <button onClick={() => setNotesExpanded((s) => !s)} className="text-[11px] font-black uppercase text-indigo-400">
-                              {notesExpanded ? "Collapse notes" : `Show past notes`}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">No notes yet for this account.</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <ActivityLog
+                notesList={notesList}
+                currentNote={currentNote}
+                setCurrentNote={setCurrentNote}
+                onAddNote={handleAddNote}
+                onDeleteNote={handleDeleteNote}
+                notesExpanded={notesExpanded}
+                setNotesExpanded={setNotesExpanded}
+                gpvTiers={GPV_TIERS}
+                selectedGpvTier={selectedGpvTier}
+                onApplyGpvTier={applyGpvTier}
+                selectedActiveOpp={selectedActiveOpp}
+                onToggleActiveOpp={toggleActiveOpp}
+              />
             </div>
           ) : (
             <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">

@@ -3,23 +3,26 @@ export async function POST(req) {
     const body = await req.json();
     const key = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
 
-    const name = body.name || "(unknown)";
-    const address = body.address || "";
+    const businessName = body.name || "(unknown)";
     const city = body.city || "Texas";
-    const custom = Boolean(body.isCustom);
-    const question = body.question || "";
+    const taxpayer = body.taxpayer || businessName;
 
     // If no key is configured return a safe mock so the UI can be tested locally
     if (!key) {
-      const mockText = `OWNERS: Not found\nLOCATION COUNT: —\nACCOUNT DETAILS: Mock response for "${name}" (no server API key configured).`;
+      const mockText = `Mock response for "${businessName}" (no server API key configured).`;
       return new Response(JSON.stringify({ mock: true, text: mockText }), { status: 200 });
     }
 
-    const fewShot = `EXAMPLE:\n\nOWNERS: Alice Johnson, Bob Smith\nLOCATION COUNT: 3\nACCOUNT DETAILS: Family-owned; flagship location is downtown; recently opened a second bar.`;
+    // Three-section prompt requesting structured output
+    const prompt = `Find the individual owners or executive management for "${businessName}" in ${city}, TX. Look specifically for the people behind the LLC "${taxpayer}". 
 
-    const defaultPrompt = `You are a concise, cautious web researcher. For the account "${name}" at ${address} in ${city}, produce exactly three labeled sections with these headings and formats. Be factual and if you don't know an item, reply with 'Not found' (for OWNERS) or '—' (for others). Do not invent people or numbers.\n\nOWNERS: Output only owner names, comma- or newline-separated, or 'Not found'.\n\nLOCATION COUNT: Output a single digit or number (digits only), or '—' if unknown.\n\nACCOUNT DETAILS: 2–3 brief, actionable or interesting facts for prospecting; if unknown output '—'.\n\nOutput only these three labeled sections and nothing else.`;
+Please provide your response in EXACTLY this format:
 
-    const prompt = custom ? String(question) : fewShot + "\n\n" + defaultPrompt;
+OWNERS: [List individual people's names, titles, or relationships. If not found, say "Not readily available"]
+
+LOCATION COUNT: [Number of locations this business operates. If not found, say "Unknown"]
+
+ACCOUNT DETAILS: [Brief company overview, industry, notable info. If not found, provide general context]`;
 
     // Helper: call Gemini with retry/backoff
     const callGeminiWithRetry = async (payload, retries = 4, delay = 800) => {
@@ -55,10 +58,12 @@ export async function POST(req) {
       }
     };
 
-    // Compose payload in the same shape used by the older client code
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
-      systemInstruction: { parts: [{ text: "You are Pocket Prospector, a sales tool. Find individual owners/management for Texas businesses. Use labels: OWNERS:, LOCATION COUNT:, ACCOUNT DETAILS:" }] },
+      systemInstruction: { 
+        parts: [{ text: "You are a business intelligence assistant specialized in the Texas hospitality market." }] 
+      },
+      tools: [{ "google_search": {} }]
     };
 
     const result = await callGeminiWithRetry(payload);
