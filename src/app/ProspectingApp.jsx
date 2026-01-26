@@ -147,6 +147,7 @@ function parseSavedNotes(raw) {
 // -------------------- Component --------------------
 export default function ProspectingApp() {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
+  const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
 
   const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics
   const [savedSubView, setSavedSubView] = useState("list"); // list | map
@@ -683,9 +684,18 @@ export default function ProspectingApp() {
         attributionControl: false,
       }).setView(TEXAS_CENTER, 6);
 
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        maxZoom: 19,
-      }).addTo(mapInstance.current);
+      if (MAPBOX_KEY) {
+        L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+          tileSize: 512,
+          zoomOffset: -1,
+          maxZoom: 22,
+          attribution: '© Mapbox © OpenStreetMap',
+        }).addTo(mapInstance.current);
+      } else {
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          maxZoom: 19,
+        }).addTo(mapInstance.current);
+      }
 
       L.control.zoom({ position: "bottomright" }).addTo(mapInstance.current);
 
