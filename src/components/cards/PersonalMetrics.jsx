@@ -1,6 +1,59 @@
-import { TrendingUp, Users, Target } from "lucide-react";
+import { TrendingUp, Users, Target, Clock } from "lucide-react";
+import { useState, useEffect } from "react";
 
-export default function PersonalMetrics({ data }) {
+const ACTIVITY_TYPES = [
+  { value: "walk-in", label: "Walk-In", color: "#3b82f6" },
+  { value: "call", label: "Call", color: "#10b981" },
+  { value: "text", label: "Text", color: "#8b5cf6" },
+  { value: "email", label: "Email", color: "#f59e0b" },
+  { value: "update", label: "Update", color: "#64748b" },
+];
+
+export default function PersonalMetrics({ data, onActivityClick }) {
+  const [todaysActivities, setTodaysActivities] = useState([]);
+
+  useEffect(() => {
+    // Fetch today's activities from all saved accounts
+    const fetchTodaysActivities = async () => {
+      try {
+        const accounts = await fetch('/api/accounts', { cache: 'no-store' }).then(r => r.json());
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        
+        const activities = [];
+        
+        accounts.forEach(account => {
+          try {
+            const notes = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
+            if (notes?.notes && Array.isArray(notes.notes)) {
+              notes.notes.forEach(note => {
+                const noteDate = new Date(note.created_at).toISOString().split('T')[0];
+                if (noteDate === today) {
+                  activities.push({
+                    ...note,
+                    account_name: account.name,
+                    account_id: account.id
+                  });
+                }
+              });
+            }
+          } catch (e) {
+            // Skip invalid notes
+          }
+        });
+        
+        // Sort by most recent first
+        activities.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        setTodaysActivities(activities);
+      } catch (err) {
+        console.error('Failed to fetch activities:', err);
+      }
+    };
+
+    fetchTodaysActivities();
+    // Refresh every minute
+    const interval = setInterval(fetchTodaysActivities, 60000);
+    return () => clearInterval(interval);
+  }, []);
   if (!data) return null;
 
   const rows = data.rawRows || [];
@@ -24,6 +77,52 @@ export default function PersonalMetrics({ data }) {
 
   return (
     <div className="space-y-6">
+      {/* Today's Activity */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 rounded-3xl border border-slate-700 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Clock className="text-indigo-400" size={20} />
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">Today's Activity</h3>
+          </div>
+          <div className="px-3 py-1 bg-indigo-900/30 rounded-full border border-indigo-700/50 text-xs font-black text-indigo-300">
+            {todaysActivities.length} {todaysActivities.length === 1 ? 'Activity' : 'Activities'}
+          </div>
+        </div>
+
+        <div className="space-y-2 max-h-96 overflow-y-auto custom-scroll">
+          {todaysActivities.length > 0 ? (
+            todaysActivities.map((activity) => {
+              const activityTypeInfo = ACTIVITY_TYPES.find(t => t.value === activity.activity_type) || ACTIVITY_TYPES[4];
+              return (
+                <div
+                  key={activity.id}
+                  onClick={() => onActivityClick && onActivityClick(activity.account_id)}
+                  className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 cursor-pointer hover:bg-slate-700/50 transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div
+                      className="px-2 py-1 rounded-lg text-[9px] font-black uppercase"
+                      style={{ backgroundColor: activityTypeInfo.color + '20', color: activityTypeInfo.color }}
+                    >
+                      {activityTypeInfo.label}
+                    </div>
+                    <div className="text-slate-400 text-[10px] font-bold">
+                      {new Date(activity.created_at).toLocaleTimeString()}
+                    </div>
+                  </div>
+                  <div className="text-slate-300 font-bold text-xs mb-1">{activity.account_name}</div>
+                  <div className="text-slate-400 text-[11px]">{activity.text}</div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-8 text-slate-500 text-sm">
+              No activities logged today yet.
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Prospecting - full width */}
       <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
         <div className="flex items-center justify-between mb-4">

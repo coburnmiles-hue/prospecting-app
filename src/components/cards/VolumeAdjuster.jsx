@@ -1,7 +1,7 @@
-import { Utensils, Percent } from "lucide-react";
+import { Utensils, Percent, Lock, Unlock } from "lucide-react";
 import { formatCurrency } from "../../utils/formatters";
 
-export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats }) {
+export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved }) {
   return (
     <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 flex flex-col">
       <div className="flex items-center justify-between mb-6">
@@ -13,17 +13,39 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
         </div>
       </div>
 
-      <select
-        className="w-full bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[10px] font-black text-slate-200 uppercase outline-none mb-6 cursor-pointer"
-        value={venueType}
-        onChange={onVenueChange}
-      >
-        {Object.entries(venueTypes).map(([k, v]) => (
-          <option key={k} value={k}>
-            {v.label}
-          </option>
-        ))}
-      </select>
+      <div className="flex gap-2 mb-6">
+        {isLocked ? (
+          <div className="flex-1 bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[10px] font-black text-slate-200 uppercase flex items-center justify-between">
+            <span>{venueTypes[venueType].label}</span>
+          </div>
+        ) : (
+          <select
+            className="flex-1 bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[10px] font-black text-slate-200 uppercase outline-none cursor-pointer"
+            value={venueType}
+            onChange={onVenueChange}
+          >
+            {Object.entries(venueTypes).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        )}
+        
+        {isSaved && (
+          <button
+            onClick={onToggleLock}
+            className={`px-4 rounded-2xl transition-all border ${
+              isLocked 
+                ? 'bg-indigo-600 border-indigo-500 text-white' 
+                : 'bg-[#0F172A] border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+            title={isLocked ? "Unlock to change genre" : "Lock current genre"}
+          >
+            {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+          </button>
+        )}
+      </div>
 
       <div className="bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800 mt-auto">
         <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">

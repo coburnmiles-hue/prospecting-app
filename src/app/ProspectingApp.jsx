@@ -40,6 +40,7 @@ import ForecastCard from "../components/cards/ForecastCard";
 import AIIntelPanel from "../components/cards/AIIntelPanel";
 import VolumeAdjuster from "../components/cards/VolumeAdjuster";
 import ActivityLog from "../components/cards/ActivityLog";
+import GpvTierPanel from "../components/cards/GpvTierPanel";
 import PersonalMetrics from "../components/cards/PersonalMetrics";
 import { formatCurrency, getFullAddress } from "../utils/formatters";
 
@@ -72,7 +73,9 @@ const GPV_TIERS = [
   { id: "tier1", label: "$0-50K", color: "#3b82f6" },
   { id: "tier2", label: "$50-100K", color: "#8b5cf6" },
   { id: "tier3", label: "$100-250K", color: "#ec4899" },
-  { id: "tier4", label: "$250K+", color: "#f59e0b" },
+  { id: "tier4", label: "$250-500K", color: "#f59e0b" },
+  { id: "tier5", label: "$500K-1M", color: "#10b981" },
+  { id: "tier6", label: "$1M+", color: "#ef4444" },
 ];
 
 // Helper functions
@@ -179,12 +182,15 @@ export default function ProspectingApp() {
 
   // Notes (client only in this version)
   const [currentNote, setCurrentNote] = useState("");
+  const [activityType, setActivityType] = useState("update");
   const [notesList, setNotesList] = useState([]);
   const [notesExpanded, setNotesExpanded] = useState(false);
   // notesOwner tracks which account the notesList belongs to: { id?: number|null, key?: string }
   const [notesOwner, setNotesOwner] = useState({ id: null, key: null });
   const [selectedGpvTier, setSelectedGpvTier] = useState(null);
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
+  const [venueTypeLocked, setVenueTypeLocked] = useState(false);
+  const savingLockStateRef = useRef(false);
 
   // Map
   const mapRef = useRef(null);
@@ -203,7 +209,6 @@ export default function ProspectingApp() {
   const [manualCityFilter, setManualCityFilter] = useState("");
   const [manualResults, setManualResults] = useState([]);
   const [manualSelected, setManualSelected] = useState(null);
-  const [manualGpvAmount, setManualGpvAmount] = useState("");
   const [manualSearching, setManualSearching] = useState(false);
   const manualSearchTimeout = useRef(null);
 
@@ -344,6 +349,7 @@ export default function ProspectingApp() {
     setSelectedGpvTier(null);
     setSelectedActiveOpp(false);
     setNotesList([]);
+    setVenueTypeLocked(false);
     setNotesOwner({ id: null, key: null });
 
     if (!est?.taxpayer_number || !est?.location_number) return;
@@ -465,7 +471,7 @@ export default function ProspectingApp() {
         lat,
         lng,
         // store key + optional notes/history and GPV tier in the notes field
-        notes: JSON.stringify({ key: `KEY:${key}`, notes: Array.isArray(notesToPersist) ? notesToPersist : [], history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], gpvTier: selectedGpvTier, activeOpp: selectedActiveOpp, venueType: venueType }),
+        notes: JSON.stringify({ key: `KEY:${key}`, notes: Array.isArray(notesToPersist) ? notesToPersist : [], history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], gpvTier: selectedGpvTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked }),
       };
 
       const res = await fetch("/api/accounts", {
@@ -505,6 +511,7 @@ export default function ProspectingApp() {
       setSelectedGpvTier(null);
       setSelectedActiveOpp(false);
       setNotesList([]);
+      setVenueTypeLocked(false);
       setNotesOwner({ id: null, key: null });
       return;
     }
@@ -517,6 +524,10 @@ export default function ProspectingApp() {
       setSelectedActiveOpp(parsed?.activeOpp || false);
       if (parsed?.venueType) {
         setVenueType(parsed.venueType);
+      }
+      // Only update lock state if we're not actively saving it (prevents race condition)
+      if (!savingLockStateRef.current) {
+        setVenueTypeLocked(parsed?.venueTypeLocked || false);
       }
       // Set notes and owner, even if empty
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
@@ -555,12 +566,17 @@ export default function ProspectingApp() {
   }, [selectedEstablishment, savedAccounts]);
 
   const handleAddNote = async () => {
-    if (!currentNote.trim() || !selectedEstablishment?.info) return;
+    console.log('handleAddNote called', { currentNote, activityType, hasEstablishment: !!selectedEstablishment?.info });
+    
+    if (!currentNote.trim() || !selectedEstablishment?.info) {
+      console.log('Early return - missing note or establishment');
+      return;
+    }
 
     const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
 
     // Prefer direct ID match when possible, otherwise match by exact parsed key
-    const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+    let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
       if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
       try {
         const parsed = parseSavedNotes(a.notes);
@@ -569,35 +585,118 @@ export default function ProspectingApp() {
       return false;
     });
 
+    // If not saved yet, auto-save the account first so notes can persist
     if (!saved || !saved.id) {
-      // not a saved account yet — keep UI-only note and mark owner by key so future save attaches correctly
-      const newNote = { id: Math.floor(Date.now() / 1000), text: currentNote, created_at: new Date().toISOString() };
-      setNotesList((prev) => [newNote, ...prev]);
-      setNotesOwner({ id: null, key });
-      setCurrentNote("");
-      return;
+      try {
+        const info = selectedEstablishment.info;
+        const addr = getFullAddress(info);
+        let lat, lng;
+        
+        // Try to get coords from info or geocode
+        lat = Number(info.lat);
+        lng = Number(info.lng);
+        
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          try {
+            const q = encodeURIComponent(addr || "");
+            const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`;
+            const geoRes = await fetch(url, { headers: { "User-Agent": "prospecting-app" } });
+            if (geoRes.ok) {
+              const geoJson = await geoRes.json();
+              if (Array.isArray(geoJson) && geoJson[0]) {
+                lat = Number(geoJson[0].lat);
+                lng = Number(geoJson[0].lon);
+              }
+            }
+          } catch (e) {}
+        }
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          const pseudo = pseudoLatLng(info.taxpayer_number || info.location_number || addr);
+          lat = pseudo.lat;
+          lng = pseudo.lng;
+        }
+
+        const payload = {
+          name: info.location_name || info.name || "Account",
+          address: addr,
+          lat,
+          lng,
+          notes: JSON.stringify({ 
+            key: `KEY:${key}`, 
+            notes: [], 
+            history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [],
+            gpvTier: selectedGpvTier,
+            activeOpp: selectedActiveOpp,
+            venueType: venueType,
+            venueTypeLocked: venueTypeLocked
+          }),
+        };
+
+        const res = await fetch("/api/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) throw new Error("Auto-save failed");
+        
+        const created = await res.json();
+        const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
+        setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+        
+        // Update selected establishment with new ID
+        setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, id: created.id } } : s);
+        
+        saved = created;
+      } catch (err) {
+        setError(err?.message || "Could not save account for notes.");
+        return;
+      }
     }
 
     try {
+      console.log('Making API call to add note', { accountId: saved.id, text: currentNote, activity_type: activityType });
+      
       const res = await fetch(`/api/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: saved.id, text: currentNote }),
+        body: JSON.stringify({ accountId: saved.id, text: currentNote, activity_type: activityType }),
       });
-      if (!res.ok) throw new Error("Note save failed");
+      
+      console.log('API response status:', res.status);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('API error:', errorText);
+        throw new Error("Note save failed");
+      }
+      
       const body = await res.json();
+      console.log('API response body:', body);
+      
       setNotesList(Array.isArray(body.notes) ? body.notes : []);
       setNotesOwner({ id: saved.id, key: null });
+      
+      // Reset activity type to default after adding note
+      setActivityType("update");
 
       // refresh current gpv tier from saved row if present
       try {
         const refreshedRow = (await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json())).find((r) => r.id === saved.id);
         if (refreshedRow) {
           const parsed = parseSavedNotes(refreshedRow.notes);
-            setSelectedGpvTier(parsed?.gpvTier || null);
-            setSelectedActiveOpp(parsed?.activeOpp || false);
-            if (parsed?.venueType) {
+            if (parsed?.gpvTier !== selectedGpvTier) {
+              setSelectedGpvTier(parsed?.gpvTier || null);
+            }
+            if (parsed?.activeOpp !== selectedActiveOpp) {
+              setSelectedActiveOpp(parsed?.activeOpp || false);
+            }
+            if (parsed?.venueType && parsed.venueType !== venueType) {
               setVenueType(parsed.venueType);
+            }
+            if (parsed?.venueTypeLocked !== venueTypeLocked) {
+              setVenueTypeLocked(parsed?.venueTypeLocked || false);
             }
         }
       } catch {}
@@ -812,10 +911,27 @@ export default function ProspectingApp() {
       const noteToken = (row.notes || "").toString().match(/KEY:([^\s,]+)/)?.[1];
       const rowId = row.id != null ? row.id.toString() : noteToken || `${row.lat},${row.lng}`;
 
+      // Calculate forecast if history is available
+      let forecastHtml = '';
+      if (parsed?.history && Array.isArray(parsed.history) && parsed.history.length > 0) {
+        const h = parsed.history;
+        const filtered = h.filter((m) => m.total > 0);
+        const avgAlc = filtered.length > 0 ? (filtered.reduce((sum, m) => sum + m.total, 0) / filtered.length) : 0;
+        // Use saved venue type or default
+        const vt = parsed?.venueType || 'casual_dining';
+        const cfg = VENUE_TYPES[vt] || VENUE_TYPES.casual_dining;
+        const estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
+        const forecast = avgAlc + estFood;
+        if (forecast > 0) {
+          forecastHtml = `<div style="color: #10b981; font-size: 11px; font-weight: 800; margin-bottom: 8px;">Monthly Forecast: ${formatCurrency(forecast)}</div>`;
+        }
+      }
+
       marker.bindPopup(`
         <div style="font-family: ui-sans-serif, system-ui; padding: 10px; min-width: 220px;">
           <b style="text-transform: uppercase; display: block; margin-bottom: 6px; color: #fff; font-size: 13px;">${(row.name || "").toString()}</b>
           <span style="color: #94a3b8; font-size: 10px; display: block; margin-bottom: 12px; line-height: 1.4;">${(row.address || "").toString()}</span>
+          ${forecastHtml}
           <a href="${mapsUrl}" target="_blank" style="display:block;text-align:center;background:#4f46e5;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;">
             Get Directions
           </a>
@@ -860,7 +976,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (savedSubView === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView]);
+  }, [savedAccounts, savedSubView, selectedGpvTier]);
 
   // Note: popup-based unsave has been removed; saving/unsaving is handled
   // exclusively via the Save button in the account info UI which calls
@@ -876,6 +992,107 @@ export default function ProspectingApp() {
     const estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
     return { avgAlc, estFood, total: avgAlc + estFood, cfg };
   }, [selectedEstablishment, venueType]);
+
+  // Auto-select GPV tier based on forecast
+  useEffect(() => {
+    if (stats?.total) {
+      const total = stats.total;
+      let tier = null;
+      if (total >= 1000000) tier = 'tier6';
+      else if (total >= 500000) tier = 'tier5';
+      else if (total >= 250000) tier = 'tier4';
+      else if (total >= 100000) tier = 'tier3';
+      else if (total >= 50000) tier = 'tier2';
+      else tier = 'tier1';
+      
+      // Update tier if it changed
+      if (tier !== selectedGpvTier) {
+        setSelectedGpvTier(tier);
+        
+        // Update saved account tier and trigger map marker refresh
+        if (selectedEstablishment?.info?.id) {
+          const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+          const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+            if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+            try {
+              const parsed = parseSavedNotes(a.notes);
+              if (parsed?.key && parsed.key === key) return true;
+            } catch {}
+            return false;
+          });
+          
+          if (saved && saved.id) {
+            try {
+              const parsed = parseSavedNotes(saved.notes);
+              let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], venueType: venueType };
+              notesObj.gpvTier = tier;
+              notesObj.activeOpp = selectedActiveOpp;
+              
+              fetch(`/api/accounts?id=${saved.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+              }).then(async (res) => {
+                if (res.ok) {
+                  const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
+                  setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+                }
+              }).catch(() => {});
+            } catch {}
+          }
+        }
+      }
+    }
+  }, [stats, selectedGpvTier, selectedEstablishment, savedAccounts, selectedActiveOpp, venueType]);
+
+  // Persist venue type changes to saved account
+  useEffect(() => {
+    if (!selectedEstablishment?.info?.id || !venueType) return;
+    
+    const accountId = selectedEstablishment.info.id;
+    const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+    const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+      if (accountId && a.id === accountId) return true;
+      try {
+        const parsed = parseSavedNotes(a.notes);
+        if (parsed?.key && parsed.key === key) return true;
+      } catch {}
+      return false;
+    });
+    
+    if (saved && saved.id) {
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        // Only update if venue type or lock state actually changed
+        if (parsed?.venueType === venueType && parsed?.venueTypeLocked === venueTypeLocked) return;
+        
+        // Set flag to prevent fetch from overriding during save
+        savingLockStateRef.current = true;
+        
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [] };
+        notesObj.venueType = venueType;
+        notesObj.venueTypeLocked = venueTypeLocked;
+        notesObj.gpvTier = selectedGpvTier;
+        notesObj.activeOpp = selectedActiveOpp;
+        
+        fetch(`/api/accounts?id=${saved.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        }).then(async (res) => {
+          if (res.ok) {
+            const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
+            setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+          }
+        }).catch(() => {}).finally(() => {
+          // Clear flag after save completes (with slight delay to ensure state is synced)
+          setTimeout(() => {
+            savingLockStateRef.current = false;
+          }, 100);
+        });
+      } catch {}
+    }
+  }, [venueType, venueTypeLocked, selectedGpvTier, selectedActiveOpp]);
 
   const filteredSavedAccounts = useMemo(() => {
     if (!savedSearchTerm.trim()) return savedAccounts;
@@ -905,6 +1122,7 @@ export default function ProspectingApp() {
       if (parsed?.venueType) {
         setVenueType(parsed.venueType);
       }
+      setVenueTypeLocked(parsed?.venueTypeLocked || false);
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
       setNotesOwner({ id: data.id, key: parsed.key || null });
 
@@ -1001,55 +1219,33 @@ export default function ProspectingApp() {
         isActive={isActive}
         title={title}
         subtitle={subtitle}
+        showDelete={viewMode === "saved"}
+        onDelete={viewMode === "saved" ? async () => {
+          if (!data.id) return;
+          
+          // Show confirmation dialog
+          const confirmed = window.confirm("Are you sure you want to remove this account from the saved folder?");
+          if (!confirmed) return;
+          
+          try {
+            // Delete the account (notes are stored in the same row, so they're deleted automatically)
+            await fetch(`/api/accounts?id=${data.id}`, { method: 'DELETE' });
+            const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
+            setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+            // Clear selected if it was the deleted account
+            if (selectedEstablishment?.info?.id === data.id) {
+              setSelectedEstablishment(null);
+              setNotesList([]);
+            }
+          } catch (err) {
+            setError(err?.message || 'Could not delete account.');
+          }
+        } : undefined}
       />
     );
   };
 
-    // Apply GPV tier to selected account (persist for saved accounts)
-    const applyGpvTier = async (tierId) => {
-      if (!selectedEstablishment?.info) return;
-
-      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
-
-      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
-        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
-        try {
-          const parsed = parseSavedNotes(a.notes);
-          if (parsed?.key && parsed.key === key) return true;
-        } catch {}
-        return false;
-      });
-
-      // Local-only selection for unsaved account
-      if (!saved || !saved.id) {
-        setSelectedGpvTier((s) => (s === tierId ? null : tierId));
-        setNotesOwner((o) => ({ ...o, key }));
-        return;
-      }
-
-      // Update saved account notes JSON to include gpvTier
-      try {
-        const parsed = parseSavedNotes(saved.notes);
-          let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [] };
-          notesObj.gpvTier = notesObj.gpvTier === tierId ? null : tierId;
-
-        const res = await fetch(`/api/accounts?id=${saved.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
-        });
-        if (!res.ok) throw new Error("Could not update tier");
-
-        const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-        setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
-
-        // set UI state
-        setSelectedGpvTier(notesObj.gpvTier || null);
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
-      } catch (err) {
-        setError(err?.message || "Could not set GPV tier.");
-      }
-    };
+    // Note: GPV tier is now auto-selected based on forecast, not manually clickable
 
     // Toggle Active Opportunity flag for selected account
     const toggleActiveOpp = async () => {
@@ -1332,12 +1528,6 @@ export default function ProspectingApp() {
                     placeholder="Address" 
                     className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
                   />
-                  <input 
-                    value={manualGpvAmount} 
-                    onChange={(e) => setManualGpvAmount(e.target.value)} 
-                    placeholder="Optional GPV amount (e.g. 350000)" 
-                    className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
-                  />
 
                   <div className="flex gap-2">
                     <button
@@ -1363,7 +1553,7 @@ export default function ProspectingApp() {
                           address,
                           lat,
                           lng,
-                          notes: JSON.stringify({ manual: true, gpvAmount: manualGpvAmount ? Number(manualGpvAmount) : null })
+                          notes: JSON.stringify({ manual: true })
                         };
                         try {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -1375,7 +1565,6 @@ export default function ProspectingApp() {
                           setManualQuery('');
                           setManualResults([]);
                           setManualSelected(null);
-                          setManualGpvAmount('');
                           // open the newly created account in the detail panel with proper ID so SaveButton shows as saved
                           setSelectedEstablishment({ 
                             info: { 
@@ -1419,7 +1608,39 @@ export default function ProspectingApp() {
                 </p>
               </div>
             ) : (
-              <PersonalMetrics data={metricsData} />
+              <PersonalMetrics 
+                data={metricsData} 
+                onActivityClick={async (accountId) => {
+                  // Switch to saved view and select the account
+                  setViewMode('saved');
+                  setSavedSubView('info');
+                  
+                  // Find the account in savedAccounts
+                  const account = savedAccounts.find(a => a.id === accountId);
+                  if (account) {
+                    // Create establishment object from saved account
+                    try {
+                      const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
+                      const keyParts = parsed?.key ? parsed.key.split('-') : [];
+                      
+                      setSelectedEstablishment({
+                        info: {
+                          id: account.id,
+                          location_name: account.name,
+                          location_address: account.address,
+                          taxpayer_number: keyParts[0] || undefined,
+                          location_number: keyParts[1] || undefined,
+                          lat: account.lat,
+                          lng: account.lng,
+                        },
+                        history: Array.isArray(parsed?.history) ? parsed.history : [],
+                      });
+                    } catch (e) {
+                      console.error('Failed to load account:', e);
+                    }
+                  }
+                }}
+              />
             )
           ) : savedSubView === "map" ? (
             <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[600px] flex flex-col">
@@ -1453,6 +1674,21 @@ export default function ProspectingApp() {
             </div>
           ) : selectedEstablishment ? (
             <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+              {/* Manual account banner */}
+              {(() => {
+                try {
+                  const notes = selectedEstablishment?.info?.notes || '';
+                  const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
+                  if (parsed?.manual) {
+                    return (
+                      <div className="bg-amber-900/20 border border-amber-700/50 rounded-2xl px-4 py-2 text-center">
+                        <span className="text-amber-400 font-black text-[10px] uppercase tracking-widest">⚡ Manually Created</span>
+                      </div>
+                    );
+                  }
+                } catch (e) {}
+                return null;
+              })()}
               {/* Account hero */}
               <div className="bg-[#1E293B] p-8 md:p-10 rounded-[2.5rem] border border-slate-700 shadow-2xl relative">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -1467,6 +1703,12 @@ export default function ProspectingApp() {
                         {getFullAddress(selectedEstablishment.info)}
                       </p>
 
+                      <button
+                        onClick={() => setCoordEditorOpen((s) => !s)}
+                        className="bg-indigo-600/10 border border-indigo-500/20 px-4 py-2 rounded-xl text-indigo-400 hover:bg-indigo-600 hover:text-white flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
+                      >
+                        Adjust Pin Location
+                      </button>
                       <a
                         href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
                           getFullAddress(selectedEstablishment.info)
@@ -1477,12 +1719,6 @@ export default function ProspectingApp() {
                       >
                         <ExternalLink size={14} /> Navigate Now
                       </a>
-                      <button
-                        onClick={() => setCoordEditorOpen((s) => !s)}
-                        className="bg-indigo-600/10 border border-indigo-500/20 px-4 py-2 rounded-xl text-indigo-400 hover:bg-indigo-600 hover:text-white flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
-                      >
-                        Adjust Pin Location
-                      </button>
                     </div>
                   </div>
 
@@ -1578,6 +1814,9 @@ export default function ProspectingApp() {
                   venueType={venueType}
                   onVenueChange={(e) => setVenueType(e.target.value)}
                   stats={stats}
+                  isLocked={venueTypeLocked}
+                  onToggleLock={() => setVenueTypeLocked(!venueTypeLocked)}
+                  isSaved={!!selectedEstablishment?.info?.id}
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">
@@ -1619,21 +1858,28 @@ export default function ProspectingApp() {
                 </div>
               </div>
 
-              {/* Notes / GPV */}
-              <ActivityLog
-                notesList={notesList}
-                currentNote={currentNote}
-                setCurrentNote={setCurrentNote}
-                onAddNote={handleAddNote}
-                onDeleteNote={handleDeleteNote}
-                notesExpanded={notesExpanded}
-                setNotesExpanded={setNotesExpanded}
+              {/* GPV Tier & Opportunity */}
+              <GpvTierPanel
                 gpvTiers={GPV_TIERS}
                 selectedGpvTier={selectedGpvTier}
-                onApplyGpvTier={applyGpvTier}
                 selectedActiveOpp={selectedActiveOpp}
                 onToggleActiveOpp={toggleActiveOpp}
               />
+
+              {/* Notes (only for saved accounts) */}
+              {selectedEstablishment?.info?.id && (
+                <ActivityLog
+                  notesList={notesList}
+                  currentNote={currentNote}
+                  setCurrentNote={setCurrentNote}
+                  onAddNote={handleAddNote}
+                  onDeleteNote={handleDeleteNote}
+                  notesExpanded={notesExpanded}
+                  setNotesExpanded={setNotesExpanded}
+                  activityType={activityType}
+                  setActivityType={setActivityType}
+                />
+              )}
             </div>
           ) : (
             <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">

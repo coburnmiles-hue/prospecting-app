@@ -42,6 +42,7 @@ export async function POST(req) {
     const body = await req.json();
     const accountId = Number(body?.accountId);
     const text = (body?.text || "").toString().trim();
+    const activity_type = body?.activity_type || "update";
 
     if (!Number.isFinite(accountId) || !text) {
       return Response.json({ error: "accountId and text are required" }, { status: 400 });
@@ -51,7 +52,13 @@ export async function POST(req) {
     if (!row) return Response.json({ error: "Account not found" }, { status: 404 });
 
     const now = new Date().toISOString();
-    const newNote = { id: Math.floor(Date.now() / 1000), text, created_at: now };
+    const newNote = { 
+      id: Date.now() + Math.random(), 
+      text, 
+      activity_type,
+      created_at: now,
+      account_id: accountId
+    };
 
     let notesObj = { notes: [] };
     const raw = row.notes || "";
