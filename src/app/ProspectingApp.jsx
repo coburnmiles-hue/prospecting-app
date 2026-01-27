@@ -139,11 +139,13 @@ function parseSavedNotes(raw) {
       gpvTier: p?.gpvTier ?? null,
       activeOpp: p?.activeOpp ?? false,
       venueType: p?.venueType || null,
+      venueTypeLocked: p?.venueTypeLocked ?? false,
+      aiResponse: p?.aiResponse || "",
       raw: p,
     };
   } catch (e) {
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, venueType: null, raw: s };
+    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, venueType: null, venueTypeLocked: false, aiResponse: "", raw: s };
   }
 }
 
@@ -191,6 +193,7 @@ export default function ProspectingApp() {
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
   const [venueTypeLocked, setVenueTypeLocked] = useState(false);
   const savingLockStateRef = useRef(false);
+  const skipAiLookupRef = useRef(false);
 
   // Map
   const mapRef = useRef(null);
@@ -343,6 +346,7 @@ export default function ProspectingApp() {
   const analyze = async (est) => {
     setError("");
     setAiResponse("");
+    skipAiLookupRef.current = false;
     setCurrentNote("");
     setSelectedEstablishment(null);
     // Clear transient selection state so new account starts with no GPV/opp/notes selected
@@ -448,6 +452,12 @@ export default function ProspectingApp() {
     }
 
     try {
+      // Require AI intel to be loaded before saving a new account
+      if (aiLoading) {
+        setError("Please wait for AI Intelligence to finish loading before saving.");
+        return;
+      }
+
       // Require GPV tier to be selected before saving a new account
       if (!selectedGpvTier) {
         setError("Please select a GPV Tier before saving this account.");
@@ -470,9 +480,21 @@ export default function ProspectingApp() {
         address: addr,
         lat,
         lng,
-        // store key + optional notes/history and GPV tier in the notes field
-        notes: JSON.stringify({ key: `KEY:${key}`, notes: Array.isArray(notesToPersist) ? notesToPersist : [], history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], gpvTier: selectedGpvTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked }),
+        // store key + optional notes/history, GPV tier, and AI response in the notes field
+        notes: JSON.stringify({ 
+          key: `KEY:${key}`, 
+          notes: Array.isArray(notesToPersist) ? notesToPersist : [], 
+          history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], 
+          gpvTier: selectedGpvTier, 
+          activeOpp: selectedActiveOpp, 
+          venueType: venueType, 
+          venueTypeLocked: venueTypeLocked,
+          aiResponse: aiResponse || ""
+        }),
       };
+
+      console.log("Saving account with AI response:", aiResponse ? `${aiResponse.substring(0, 100)}...` : "EMPTY");
+      console.log("Full payload notes:", payload.notes);
 
       const res = await fetch("/api/accounts", {
         method: "POST",
@@ -485,8 +507,6 @@ export default function ProspectingApp() {
       // Reload saved
       const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
       setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
-      setViewMode("saved");
-      setSavedSubView("list");
     } catch (err) {
       setError(err?.message || "Could not save.");
     }
@@ -566,12 +586,7 @@ export default function ProspectingApp() {
   }, [selectedEstablishment, savedAccounts]);
 
   const handleAddNote = async () => {
-    console.log('handleAddNote called', { currentNote, activityType, hasEstablishment: !!selectedEstablishment?.info });
-    
-    if (!currentNote.trim() || !selectedEstablishment?.info) {
-      console.log('Early return - missing note or establishment');
-      return;
-    }
+    if (!currentNote.trim() || !selectedEstablishment?.info) return;
 
     const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
 
@@ -629,7 +644,8 @@ export default function ProspectingApp() {
             gpvTier: selectedGpvTier,
             activeOpp: selectedActiveOpp,
             venueType: venueType,
-            venueTypeLocked: venueTypeLocked
+            venueTypeLocked: venueTypeLocked,
+            aiResponse: aiResponse || ""
           }),
         };
 
@@ -656,24 +672,15 @@ export default function ProspectingApp() {
     }
 
     try {
-      console.log('Making API call to add note', { accountId: saved.id, text: currentNote, activity_type: activityType });
-      
       const res = await fetch(`/api/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: saved.id, text: currentNote, activity_type: activityType }),
       });
       
-      console.log('API response status:', res.status);
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('API error:', errorText);
-        throw new Error("Note save failed");
-      }
+      if (!res.ok) throw new Error("Note save failed");
       
       const body = await res.json();
-      console.log('API response body:', body);
       
       setNotesList(Array.isArray(body.notes) ? body.notes : []);
       setNotesOwner({ id: saved.id, key: null });
@@ -756,6 +763,26 @@ export default function ProspectingApp() {
   const performIntelligenceLookup = async () => {
     if (!selectedEstablishment || !selectedEstablishment.info) return;
     
+    // Skip if AI response is already loaded (e.g., from clicking a saved account)
+    if (aiResponse && aiResponse.trim()) {
+      return;
+    }
+    
+    // Check if this is a saved account with existing AI response
+    const info = selectedEstablishment.info;
+    if (info.id) {
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => a.id === info.id);
+      if (saved) {
+        try {
+          const parsed = parseSavedNotes(saved.notes);
+          if (parsed?.aiResponse) {
+            setAiResponse(parsed.aiResponse);
+            return; // Don't re-run AI lookup if we have saved response
+          }
+        } catch {}
+      }
+    }
+    
     setAiLoading(true);
     setAiResponse("");
     
@@ -800,11 +827,21 @@ export default function ProspectingApp() {
     }
   };
 
-  // Auto-trigger AI lookup when an account is selected
+  // Auto-trigger AI lookup when an account is selected (but only if no AI response exists)
   useEffect(() => {
-    if (selectedEstablishment && selectedEstablishment.info) {
-      performIntelligenceLookup();
+    console.log("AI lookup useEffect triggered. selectedEstablishment:", !!selectedEstablishment, "aiResponse:", aiResponse ? "HAS VALUE" : "EMPTY", "skipFlag:", skipAiLookupRef.current);
+    if (skipAiLookupRef.current) {
+      console.log("Skipping AI lookup - using cached response");
+      skipAiLookupRef.current = false;
+      return;
     }
+    if (selectedEstablishment && selectedEstablishment.info && !aiResponse) {
+      console.log("Triggering AI lookup");
+      performIntelligenceLookup();
+    } else {
+      console.log("Skipping AI lookup - already have response or no establishment selected");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment]);
 
   // ---------- Map setup ----------
@@ -1116,6 +1153,9 @@ export default function ProspectingApp() {
     if (viewMode === "saved") {
       const parsed = parseSavedNotes(data.notes);
 
+      console.log("Clicked saved account, parsed data:", parsed);
+      console.log("AI Response in saved data:", parsed?.aiResponse);
+
       // Always restore GPV, Active Opp, venue type and notes owner for saved items (if present)
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
@@ -1125,7 +1165,19 @@ export default function ProspectingApp() {
       setVenueTypeLocked(parsed?.venueTypeLocked || false);
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
       setNotesOwner({ id: data.id, key: parsed.key || null });
-
+      
+      // Restore AI response FIRST for all saved accounts
+      if (parsed?.aiResponse) {
+        console.log("Restoring cached AI response");
+        skipAiLookupRef.current = true;
+        setAiResponse(parsed.aiResponse);
+        setAiLoading(false);
+      } else {
+        console.log("No cached AI response found");
+        skipAiLookupRef.current = false;
+        setAiResponse("");
+      }
+      
       // Restore chart/history immediately when present
       if (Array.isArray(parsed.history) && parsed.history.length) {
         // include DB id and possible taxpayer/location from parsed.key so fetchNotesForSelected can match
@@ -1726,6 +1778,7 @@ export default function ProspectingApp() {
                     <SaveButton
                       onClick={toggleSaveAccount}
                       isSaved={isSaved(selectedEstablishment.info)}
+                      disabled={aiLoading && !isSaved(selectedEstablishment.info)}
                     />
 
                     <ForecastCard total={stats?.total || 0} />
