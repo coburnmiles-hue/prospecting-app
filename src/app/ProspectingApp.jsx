@@ -191,6 +191,22 @@ export default function ProspectingApp() {
   const mapInstance = useRef(null);
   const markersRef = useRef({});
 
+  // Coordinate editor state
+  const [coordLat, setCoordLat] = useState(0);
+  const [coordLng, setCoordLng] = useState(0);
+  const [coordSaving, setCoordSaving] = useState(false);
+  const [coordSaved, setCoordSaved] = useState(false);
+  const [coordEditorOpen, setCoordEditorOpen] = useState(false);
+  // Manual add account state
+  const [manualAddOpen, setManualAddOpen] = useState(false);
+  const [manualQuery, setManualQuery] = useState("");
+  const [manualCityFilter, setManualCityFilter] = useState("");
+  const [manualResults, setManualResults] = useState([]);
+  const [manualSelected, setManualSelected] = useState(null);
+  const [manualGpvAmount, setManualGpvAmount] = useState("");
+  const [manualSearching, setManualSearching] = useState(false);
+  const manualSearchTimeout = useRef(null);
+
   // ---------- Load saved accounts from Neon ----------
   useEffect(() => {
     const fetchSaved = async () => {
@@ -516,6 +532,25 @@ export default function ProspectingApp() {
   useEffect(() => {
     setNotesExpanded(false);
     fetchNotesForSelected(selectedEstablishment);
+    // populate coordinate editor from selectedEstablishment or savedAccounts
+    if (selectedEstablishment && selectedEstablishment.info) {
+      const info = selectedEstablishment.info;
+      // Prefer explicit lat/lng on the selected info, otherwise try savedAccounts by id
+      let lat = Number(info.lat);
+      let lng = Number(info.lng);
+      if ((!Number.isFinite(lat) || !Number.isFinite(lng)) && info.id) {
+        const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => a.id === info.id);
+        if (saved) {
+          lat = Number(saved.lat);
+          lng = Number(saved.lng);
+        }
+      }
+      setCoordLat(Number.isFinite(lat) ? lat : 0);
+      setCoordLng(Number.isFinite(lng) ? lng : 0);
+    } else {
+      setCoordLat(0);
+      setCoordLng(0);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment, savedAccounts]);
 
@@ -786,6 +821,31 @@ export default function ProspectingApp() {
           </a>
         </div>
       `);
+
+      // When a marker is clicked, surface the account and open the coord editor
+      marker.on('click', () => {
+        try {
+          const parsed = parseSavedNotes(row.notes);
+          const keyParts = parsed?.key ? parsed.key.split('-') : [];
+          setSelectedEstablishment({
+            info: {
+              id: row.id,
+              location_name: row.name || row.location_name,
+              location_address: row.address || row.location_address,
+              taxpayer_number: keyParts[0] || undefined,
+              location_number: keyParts[1] || undefined,
+              lat: row.lat,
+              lng: row.lng,
+            },
+            history: Array.isArray(parsed?.history) ? parsed.history : [],
+          });
+          setCoordLat(row.lat || 0);
+          setCoordLng(row.lng || 0);
+          setCoordEditorOpen(true);
+        } catch (e) {
+          // ignore
+        }
+      });
 
       const key = row.id?.toString() || `${row.lat},${row.lng}`;
       markersRef.current[key] = marker;
@@ -1121,6 +1181,11 @@ export default function ProspectingApp() {
               <SavedAccountsHeader
                 searchTerm={savedSearchTerm}
                 onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
+                onAdd={() => {
+                  setManualAddOpen((s) => !s);
+                  setManualSelected(null);
+                  setManualQuery("");
+                }}
               />
             ) : (
               <SearchForm
@@ -1151,6 +1216,194 @@ export default function ProspectingApp() {
                 </div>
               )}
             </div>
+
+            {/* Manual Add Panel */}
+            {viewMode === 'saved' && manualAddOpen && (
+              <div className="mt-4 bg-[#0b1220] p-4 rounded-2xl border border-slate-700">
+                <h4 className="text-xs font-black uppercase text-indigo-300 mb-3">Add Account</h4>
+                
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <input
+                    value={manualQuery}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setManualQuery(val);
+                      // Debounced auto-search
+                      if (manualSearchTimeout.current) clearTimeout(manualSearchTimeout.current);
+                      if (val.trim().length >= 3) {
+                        manualSearchTimeout.current = setTimeout(async () => {
+                          setManualSearching(true);
+                          setManualResults([]);
+                          setError('');
+                          try {
+                            const params = new URLSearchParams({
+                              query: val.trim(),
+                              ...(manualCityFilter.trim() && { city: manualCityFilter.trim() })
+                            });
+                            const url = `/api/places?${params}`;
+                            console.log('Manual search URL:', url);
+                            const res = await fetch(url);
+                            if (!res.ok) {
+                              const errData = await res.json().catch(() => ({}));
+                              throw new Error(errData.error || `Search failed: ${res.status}`);
+                            }
+                            const data = await res.json();
+                            console.log('Manual search results:', data);
+                            const results = data.results || [];
+                            setManualResults(results);
+                            if (results.length === 0) {
+                              setError('No results found. Try a different search term or city.');
+                            }
+                          } catch (e) {
+                            console.error('Manual search error:', e);
+                            setError(e?.message || 'Search failed');
+                            setManualResults([]);
+                          } finally {
+                            setManualSearching(false);
+                          }
+                        }, 400);
+                      } else {
+                        setManualResults([]);
+                      }
+                    }}
+                    placeholder="Search business name or address..."
+                    className="col-span-2 bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]"
+                  />
+                  <input
+                    value={manualCityFilter}
+                    onChange={(e) => setManualCityFilter(e.target.value.toUpperCase())}
+                    placeholder="Filter by city (optional)"
+                    className="bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]"
+                  />
+                  <button
+                    onClick={() => {
+                      setManualQuery('');
+                      setManualCityFilter('');
+                      setManualResults([]);
+                      setManualSelected(null);
+                    }}
+                    className="bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-[10px] font-bold uppercase"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {manualSearching && (
+                  <div className="text-indigo-400 text-[11px] mb-2 flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" /> Searching...
+                  </div>
+                )}
+
+                  {manualResults.length > 0 && (
+                  <div className="max-h-64 overflow-y-auto mb-3 bg-[#020617] border border-slate-800 rounded-xl">
+                    {manualResults.map((r, i) => (
+                      <div 
+                        key={i} 
+                        className={`p-3 border-b border-slate-800 last:border-0 cursor-pointer transition-colors ${manualSelected === r ? 'bg-indigo-900/30 border-indigo-700' : 'hover:bg-slate-900'}`} 
+                        onClick={() => {
+                          setManualSelected(r);
+                          setManualResults([]);
+                          setManualQuery('');
+                        }}
+                      >
+                        <div className="font-bold text-sm text-white">{r.name || 'Unnamed'}</div>
+                        <div className="text-[11px] text-slate-400 mt-1">{r.address || ''}</div>
+                        {r.types && r.types.length > 0 && (
+                          <div className="text-[10px] text-slate-500 mt-1">
+                            {r.types.slice(0, 3).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-2 mt-4">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Selected Account</div>
+                  <input 
+                    value={manualSelected ? (manualSelected.name || '') : ''} 
+                    onChange={(e) => setManualSelected({...manualSelected, name: e.target.value})} 
+                    placeholder="Business Name" 
+                    className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
+                  />
+                  <input 
+                    value={manualSelected ? (manualSelected.address || '') : ''} 
+                    onChange={(e) => setManualSelected({...manualSelected, address: e.target.value})} 
+                    placeholder="Address" 
+                    className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
+                  />
+                  <input 
+                    value={manualGpvAmount} 
+                    onChange={(e) => setManualGpvAmount(e.target.value)} 
+                    placeholder="Optional GPV amount (e.g. 350000)" 
+                    className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
+                  />
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        // Prepare payload and save
+                        const info = manualSelected || {};
+                        const name = (info.name || '').trim() || 'Manual Account';
+                        const address = (info.address || '').trim();
+                        
+                        // Use coordinates from Google Places if available, otherwise geocode
+                        let lat = info.lat;
+                        let lng = info.lng;
+                        
+                        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                          // Fallback to pseudo coords if no valid coordinates
+                          const pseudo = pseudoLatLng(name || address || Date.now());
+                          lat = pseudo.lat; 
+                          lng = pseudo.lng;
+                        }
+
+                        const payload = {
+                          name,
+                          address,
+                          lat,
+                          lng,
+                          notes: JSON.stringify({ manual: true, gpvAmount: manualGpvAmount ? Number(manualGpvAmount) : null })
+                        };
+                        try {
+                          const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                          if (!res.ok) throw new Error('Save failed');
+                          const created = await res.json();
+                          const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
+                          setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+                          setManualAddOpen(false);
+                          setManualQuery('');
+                          setManualResults([]);
+                          setManualSelected(null);
+                          setManualGpvAmount('');
+                          // open the newly created account in the detail panel with proper ID so SaveButton shows as saved
+                          setSelectedEstablishment({ 
+                            info: { 
+                              id: created.id, 
+                              location_name: created.name, 
+                              location_address: created.address, 
+                              lat: created.lat, 
+                              lng: created.lng,
+                              // Include the notes field so isSaved can match it
+                              notes: created.notes
+                            }, 
+                            history: [] 
+                          });
+                          // Trigger AI lookup for the new account
+                          performIntelligenceLookup();
+                        } catch (err) {
+                          setError(err?.message || 'Could not save account.');
+                        }
+                      }}
+                      className="bg-indigo-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase"
+                    >
+                      Save Account
+                    </button>
+                    <button onClick={() => setManualAddOpen(false)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </aside>
         )}
 
@@ -1224,10 +1477,16 @@ export default function ProspectingApp() {
                       >
                         <ExternalLink size={14} /> Navigate Now
                       </a>
+                      <button
+                        onClick={() => setCoordEditorOpen((s) => !s)}
+                        className="bg-indigo-600/10 border border-indigo-500/20 px-4 py-2 rounded-xl text-indigo-400 hover:bg-indigo-600 hover:text-white flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
+                      >
+                        Adjust Pin Location
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-3 shrink-0">
                     <SaveButton
                       onClick={toggleSaveAccount}
                       isSaved={isSaved(selectedEstablishment.info)}
@@ -1242,6 +1501,74 @@ export default function ProspectingApp() {
                   aiLoading={aiLoading}
                   aiResponse={aiResponse}
                 />
+                {coordEditorOpen && (
+                  <div className="mt-6 bg-[#071126] p-4 rounded-2xl border border-slate-700">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        step="0.000001"
+                        value={coordLat}
+                        onChange={(e) => setCoordLat(Number(e.target.value))}
+                        className="w-36 bg-[#020617] border border-slate-700 text-[11px] font-bold px-3 py-2 rounded-xl"
+                        placeholder="Latitude"
+                      />
+                      <input
+                        type="number"
+                        step="0.000001"
+                        value={coordLng}
+                        onChange={(e) => setCoordLng(Number(e.target.value))}
+                        className="w-36 bg-[#020617] border border-slate-700 text-[11px] font-bold px-3 py-2 rounded-xl"
+                        placeholder="Longitude"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!selectedEstablishment?.info || !selectedEstablishment.info.id) {
+                            setError('Coordinate editing only supported for saved accounts.');
+                            return;
+                          }
+                          if (!Number.isFinite(coordLat) || coordLat < -90 || coordLat > 90) {
+                            setError('Latitude must be a number between -90 and 90.');
+                            return;
+                          }
+                          if (!Number.isFinite(coordLng) || coordLng < -180 || coordLng > 180) {
+                            setError('Longitude must be a number between -180 and 180.');
+                            return;
+                          }
+                          setError('');
+                          setCoordSaving(true);
+                          setCoordSaved(false);
+                          try {
+                            const id = selectedEstablishment.info.id;
+                            const res = await fetch(`/api/accounts?id=${id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ lat: coordLat, lng: coordLng }),
+                            });
+                            if (!res.ok) throw new Error('Failed to update coordinates');
+                            const updated = await res.json();
+                            const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
+                            setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+                            setSelectedEstablishment((s) => s ? { ...s, info: { ...s.info, lat: coordLat, lng: coordLng } } : s);
+                            setCoordSaved(true);
+                            setTimeout(() => setCoordSaved(false), 2500);
+                            // close editor after save
+                            setCoordEditorOpen(false);
+                          } catch (err) {
+                            setError(err?.message || 'Could not update coordinates.');
+                          } finally {
+                            setCoordSaving(false);
+                          }
+                        }}
+                        disabled={coordSaving}
+                        className={`bg-indigo-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase tracking-wider ${coordSaving ? 'opacity-70 cursor-wait' : ''}`}
+                      >
+                        {coordSaving ? 'Saving...' : 'Save Coords'}
+                      </button>
+                      <button onClick={() => setCoordEditorOpen(false)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[12px] font-bold">Cancel</button>
+                      {coordSaved && <div className="text-emerald-400 font-bold text-[12px] ml-2">Saved</div>}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Volume Adjuster + Historical Volume */}

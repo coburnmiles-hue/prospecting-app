@@ -58,14 +58,45 @@ export async function PATCH(req) {
     }
 
     const body = await req.json();
-    const notes = (body?.notes ?? "").toString();
+    const notes = body?.notes != null ? (body.notes ?? "").toString() : null;
+    const lat = body?.lat != null ? Number(body.lat) : null;
+    const lng = body?.lng != null ? Number(body.lng) : null;
 
-    const rows = await sql`
-      UPDATE accounts
-      SET notes = ${notes}
-      WHERE id = ${id}
-      RETURNING id, name, address, lat, lng, notes, created_at
-    `;
+    // If lat/lng provided, validate and update them
+    if ((lat !== null && !Number.isFinite(lat)) || (lng !== null && !Number.isFinite(lng))) {
+      return Response.json({ error: "lat and lng must be numbers when provided" }, { status: 400 });
+    }
+
+    let rows = [];
+
+    if (lat !== null || lng !== null) {
+      // Only update the columns provided
+      const current = (await sql`
+        SELECT lat, lng FROM accounts WHERE id = ${id}
+      `)[0];
+      const newLat = lat !== null ? lat : current?.lat;
+      const newLng = lng !== null ? lng : current?.lng;
+      rows = await sql`
+        UPDATE accounts
+        SET lat = ${newLat}, lng = ${newLng}
+        WHERE id = ${id}
+        RETURNING id, name, address, lat, lng, notes, created_at
+      `;
+    }
+
+    if (notes !== null) {
+      rows = await sql`
+        UPDATE accounts
+        SET notes = ${notes}
+        WHERE id = ${id}
+        RETURNING id, name, address, lat, lng, notes, created_at
+      `;
+    }
+
+    // If nothing was provided to update, return bad request
+    if ((lat === null && lng === null && notes === null)) {
+      return Response.json({ error: "No updatable fields provided (lat, lng, notes)" }, { status: 400 });
+    }
 
     if (!rows.length) {
       return Response.json({ error: "Account not found" }, { status: 404 });
