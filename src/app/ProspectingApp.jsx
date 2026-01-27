@@ -324,6 +324,11 @@ export default function ProspectingApp() {
     setAiResponse("");
     setCurrentNote("");
     setSelectedEstablishment(null);
+    // Clear transient selection state so new account starts with no GPV/opp/notes selected
+    setSelectedGpvTier(null);
+    setSelectedActiveOpp(false);
+    setNotesList([]);
+    setNotesOwner({ id: null, key: null });
 
     if (!est?.taxpayer_number || !est?.location_number) return;
 
@@ -479,7 +484,14 @@ export default function ProspectingApp() {
       return false;
     });
 
-    if (!saved || !saved.id) return;
+    if (!saved || !saved.id) {
+      // ensure UI state is cleared when no saved notes exist for this selection
+      setSelectedGpvTier(null);
+      setSelectedActiveOpp(false);
+      setNotesList([]);
+      setNotesOwner({ id: null, key: null });
+      return;
+    }
 
     // Try to parse notes directly from the saved row (covers rows saved with JSON notes)
     try {
@@ -727,11 +739,13 @@ export default function ProspectingApp() {
     const bounds = L.latLngBounds([]);
 
     const pins = (Array.isArray(savedAccounts) ? savedAccounts : []).map((row) => {
-      // Row has lat/lng saved, but fall back to pseudo if missing
+      // Row has lat/lng saved, but fall back to pseudo if missing. Prefer the stored KEY (taxpayer-location)
       const lat = Number(row.lat);
       const lng = Number(row.lng);
       if (Number.isFinite(lat) && Number.isFinite(lng)) return { ...row, lat, lng };
-      const pseudo = pseudoLatLng(row.id || "0");
+      const noteToken = (row.notes || "").toString().match(/KEY:([^\s,]+)/)?.[1];
+      const seed = noteToken || row.id || row.name || "0";
+      const pseudo = pseudoLatLng(seed);
       return { ...row, lat: pseudo.lat, lng: pseudo.lng };
     });
 
@@ -894,10 +908,15 @@ export default function ProspectingApp() {
     const data = item?.info || item;
 
     const isActive =
-      viewMode === "saved" &&
       selectedEstablishment?.info &&
-      ((selectedEstablishment.info.id && data.id && selectedEstablishment.info.id === data.id) ||
-        (selectedEstablishment.info.location_name === data.name && selectedEstablishment.info.location_address === data.address));
+      (
+        // Exact DB id match when available
+        (data.id != null && selectedEstablishment.info.id != null && selectedEstablishment.info.id === data.id) ||
+        // Match by taxpayer + location numbers for search/top results
+        (selectedEstablishment.info.taxpayer_number && selectedEstablishment.info.location_number && data.taxpayer_number && data.location_number && selectedEstablishment.info.taxpayer_number === data.taxpayer_number && selectedEstablishment.info.location_number === data.location_number) ||
+        // Fallback: match by name/address equality
+        (selectedEstablishment.info.location_name === (data.name || data.location_name) && selectedEstablishment.info.location_address === (data.address || data.location_address))
+      );
 
     const title =
       viewMode === "saved"
