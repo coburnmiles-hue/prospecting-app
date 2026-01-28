@@ -195,6 +195,13 @@ export default function ProspectingApp() {
   const savingLockStateRef = useRef(false);
   const skipAiLookupRef = useRef(false);
 
+  // Route planning
+  const [routePlanMode, setRoutePlanMode] = useState(false);
+  const [selectedForRoute, setSelectedForRoute] = useState([]);
+  const [calculatedRoute, setCalculatedRoute] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const routePolylineRef = useRef(null);
+
   // Map
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
@@ -427,25 +434,33 @@ export default function ProspectingApp() {
 
     const addr = getFullAddress(info);
 
-    // Try to geocode the address with OpenStreetMap Nominatim for more accurate pins.
-    // If geocoding fails or is rate-limited, fall back to pseudo coordinates.
+    // Use Google Geocoding API for accurate coordinates
     let lat, lng;
     try {
-      const q = encodeURIComponent(addr || "" + (info.location_city || ""));
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`;
-      const geoRes = await fetch(url, { headers: { "User-Agent": "prospecting-app" } });
-      if (geoRes.ok) {
-        const geoJson = await geoRes.json();
-        if (Array.isArray(geoJson) && geoJson[0]) {
-          lat = Number(geoJson[0].lat);
-          lng = Number(geoJson[0].lon);
+      console.log("Geocoding address:", addr);
+      const response = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addr })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Geocoding response:", data);
+        if (data.lat && data.lng) {
+          lat = data.lat;
+          lng = data.lng;
+          console.log("Using geocoded coordinates:", lat, lng);
         }
+      } else {
+        console.error("Geocoding failed:", response.status, await response.text());
       }
     } catch (e) {
-      // ignore geocoding errors
+      console.error("Geocoding error:", e);
     }
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      console.log("Falling back to pseudo coordinates");
       const pseudo = pseudoLatLng(info.taxpayer_number);
       lat = pseudo.lat;
       lng = pseudo.lng;
@@ -759,6 +774,73 @@ export default function ProspectingApp() {
     }
   };
 
+  // ---------- Route Planning ----------
+  const calculateRoute = async () => {
+    if (selectedForRoute.length < 2) {
+      setError("Please select at least 2 accounts to plan a route.");
+      return;
+    }
+
+    setRouteLoading(true);
+    setError("");
+
+    try {
+      const waypoints = selectedForRoute.map(id => {
+        const account = savedAccounts.find(a => a.id === id);
+        return {
+          lat: account.lat,
+          lng: account.lng,
+          name: account.name,
+        };
+      });
+
+      const res = await fetch('/api/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ waypoints }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Route calculation failed');
+      }
+
+      const route = await res.json();
+      setCalculatedRoute(route);
+
+      // Reorder selectedForRoute based on optimized waypoint order
+      if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
+        const optimizedOrder = route.waypoint_order.map(index => selectedForRoute[index]);
+        setSelectedForRoute(optimizedOrder);
+      }
+
+      // Draw route on map if map is visible
+      if (mapInstance.current && savedSubView === 'map' && route.polyline) {
+        // Remove existing route if any
+        if (routePolylineRef.current) {
+          mapInstance.current.removeLayer(routePolylineRef.current);
+        }
+
+        // Draw new route
+        const L = window.L;
+        const polyline = L.polyline(route.polyline, {
+          color: '#10b981',
+          weight: 4,
+          opacity: 0.8,
+        }).addTo(mapInstance.current);
+
+        routePolylineRef.current = polyline;
+
+        // Fit map to route bounds
+        mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to calculate route');
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
   // ---------- AI ----------
   const performIntelligenceLookup = async () => {
     if (!selectedEstablishment || !selectedEstablishment.info) return;
@@ -969,8 +1051,11 @@ export default function ProspectingApp() {
           <b style="text-transform: uppercase; display: block; margin-bottom: 6px; color: #fff; font-size: 13px;">${(row.name || "").toString()}</b>
           <span style="color: #94a3b8; font-size: 10px; display: block; margin-bottom: 12px; line-height: 1.4;">${(row.address || "").toString()}</span>
           ${forecastHtml}
-          <a href="${mapsUrl}" target="_blank" style="display:block;text-align:center;background:#4f46e5;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;">
+          <a href="${mapsUrl}" target="_blank" style="display:block;text-align:center;background:#4f46e5;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
             Get Directions
+          </a>
+          <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${row.lat},${row.lng}" target="_blank" style="display:block;text-align:center;background:#059669;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;">
+            Street View
           </a>
         </div>
       `);
@@ -1263,6 +1348,46 @@ export default function ProspectingApp() {
         ? `${data.id || data.name}-${data.created_at || ""}`
         : `${data.taxpayer_number}-${data.location_number}`;
 
+    // Route planning mode - show checkbox instead of normal click
+    if (routePlanMode && viewMode === "saved") {
+      const isSelected = selectedForRoute.includes(data.id);
+      return (
+        <div
+          key={itemKey}
+          className={`relative bg-[#0F172A] border ${isSelected ? 'border-emerald-500 bg-emerald-600/10' : 'border-slate-700'} rounded-3xl p-5 cursor-pointer transition-all hover:border-emerald-400`}
+          onClick={() => {
+            setSelectedForRoute(prev => 
+              prev.includes(data.id) 
+                ? prev.filter(id => id !== data.id)
+                : [...prev, data.id]
+            );
+          }}
+        >
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => {}}
+              className="mt-1 w-4 h-4 rounded border-slate-600 text-emerald-600 focus:ring-emerald-600"
+            />
+            <div className="flex-1">
+              <div className="text-[11px] font-black uppercase text-white tracking-wider leading-tight">
+                {title}
+              </div>
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                {subtitle}
+              </div>
+              {selectedForRoute.includes(data.id) && (
+                <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">
+                  Stop #{selectedForRoute.indexOf(data.id) + 1}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <ListItemButton
         key={itemKey}
@@ -1434,6 +1559,16 @@ export default function ProspectingApp() {
                   setManualSelected(null);
                   setManualQuery("");
                 }}
+                onPlanRoute={() => {
+                  setRoutePlanMode((m) => !m);
+                  setSelectedForRoute([]);
+                  setCalculatedRoute(null);
+                  if (routePolylineRef.current && mapInstance.current) {
+                    mapInstance.current.removeLayer(routePolylineRef.current);
+                    routePolylineRef.current = null;
+                  }
+                }}
+                routePlanMode={routePlanMode}
               />
             ) : (
               <SearchForm
@@ -1450,6 +1585,48 @@ export default function ProspectingApp() {
                 error={error}
                 viewMode={viewMode}
               />
+            )}
+
+            {/* Route Planning Panel */}
+            {routePlanMode && viewMode === "saved" && (
+              <div className="bg-emerald-600/10 border border-emerald-500/20 rounded-3xl p-5 space-y-3">
+                <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">
+                  Route Planning: {selectedForRoute.length} Stop{selectedForRoute.length !== 1 ? 's' : ''} Selected
+                </div>
+                {selectedForRoute.length >= 2 && (
+                  <button
+                    onClick={calculateRoute}
+                    disabled={routeLoading}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all"
+                  >
+                    {routeLoading ? 'Calculating...' : 'Calculate Route'}
+                  </button>
+                )}
+                {calculatedRoute && (
+                  <div className="mt-3 space-y-2 text-[10px]">
+                    <div className="flex justify-between text-emerald-300 font-bold">
+                      <span>Total Distance:</span>
+                      <span>{(calculatedRoute.distance / 1609.34).toFixed(1)} mi</span>
+                    </div>
+                    <div className="flex justify-between text-emerald-300 font-bold">
+                      <span>Est. Time:</span>
+                      <span>{Math.round(calculatedRoute.duration / 60)} min</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const waypoints = selectedForRoute.map(id => {
+                          const account = savedAccounts.find(a => a.id === id);
+                          return `${account.lat},${account.lng}`;
+                        }).join('/');
+                        window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
+                      }}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl mt-2"
+                    >
+                      Open in Google Maps
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">

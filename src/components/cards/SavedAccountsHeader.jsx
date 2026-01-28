@@ -1,19 +1,25 @@
-import { Bookmark } from "lucide-react";
+import { Bookmark, Route } from "lucide-react";
 import FilterInput from "../inputs/FilterInput";
 
-export default function SavedAccountsHeader({ searchTerm, onSearchChange, onAdd }) {
+export default function SavedAccountsHeader({ searchTerm, onSearchChange, onAdd, onPlanRoute, routePlanMode }) {
   return (
     <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-lg space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 font-black uppercase italic text-xs tracking-widest text-indigo-400">
           <Bookmark size={16} /> Portfolio
         </div>
-        <div>
+        <div className="flex gap-2">
+          <button
+            onClick={onPlanRoute}
+            className={`${routePlanMode ? 'bg-emerald-600 text-white' : 'bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-600 hover:text-white'} px-2.5 py-1.5 rounded-xl flex items-center gap-1 text-[9px] font-black uppercase tracking-widest transition-all`}
+          >
+            <Route size={12} /> {routePlanMode ? 'Exit' : 'Route'}
+          </button>
           <button
             onClick={onAdd}
-            className="bg-indigo-600/10 border border-indigo-500/20 px-3 py-2 rounded-xl text-indigo-400 hover:bg-indigo-600 hover:text-white text-[10px] font-black uppercase tracking-widest"
+            className="bg-indigo-600/10 border border-indigo-500/20 px-2.5 py-1.5 rounded-xl text-indigo-400 hover:bg-indigo-600 hover:text-white text-[9px] font-black uppercase tracking-widest"
           >
-            Add Account
+            Add
           </button>
         </div>
       </div>

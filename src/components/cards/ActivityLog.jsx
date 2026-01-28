@@ -1,4 +1,4 @@
-import { MessageSquare, Plus } from "lucide-react";
+import { MessageSquare, Plus, X } from "lucide-react";
 
 const ACTIVITY_TYPES = [
   { value: "walk-in", label: "Walk-In", color: "#3b82f6" },
@@ -48,6 +48,16 @@ export default function ActivityLog({
           value={currentNote}
           onChange={(e) => setCurrentNote(e.target.value)}
         />
+        {currentNote && (
+          <button
+            onClick={() => setCurrentNote('')}
+            className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition-colors"
+            type="button"
+            title="Clear"
+          >
+            <X size={16} />
+          </button>
+        )}
         <button
           onClick={onAddNote}
           className="absolute bottom-4 right-4 bg-indigo-600 text-white p-3 rounded-2xl shadow-xl transition-transform active:scale-95"
