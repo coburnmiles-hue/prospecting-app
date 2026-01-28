@@ -125,7 +125,7 @@ export default function ProspectingApp() {
 
   // Notes (client only in this version)
   const [currentNote, setCurrentNote] = useState("");
-  const [activityType, setActivityType] = useState("Walk-In");
+  const [activityType, setActivityType] = useState("walk-in");
   const [notesList, setNotesList] = useState([]);
   const [notesExpanded, setNotesExpanded] = useState(false);
   // notesOwner tracks which account the notesList belongs to: { id?: number|null, key?: string }
@@ -554,7 +554,7 @@ export default function ProspectingApp() {
       setNotesOwner({ id: saved.id, key: null });
       
       // Reset activity type to default after adding note
-      setActivityType("update");
+      setActivityType("walk-in");
 
       // refresh current gpv tier from saved row if present
       try {
