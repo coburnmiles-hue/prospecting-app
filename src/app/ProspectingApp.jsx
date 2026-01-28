@@ -42,7 +42,24 @@ import VolumeAdjuster from "../components/cards/VolumeAdjuster";
 import ActivityLog from "../components/cards/ActivityLog";
 import GpvTierPanel from "../components/cards/GpvTierPanel";
 import PersonalMetrics from "../components/cards/PersonalMetrics";
-import { formatCurrency, getFullAddress } from "../utils/formatters";
+
+// Utils and Constants
+import { 
+  formatCurrency, 
+  getFullAddress, 
+  parseSavedNotes, 
+  parseAiSections, 
+  pseudoLatLng, 
+  safeUpper,
+  buildSocrataWhere,
+  monthLabelFromDate
+} from "../utils/formatters";
+import { VENUE_TYPES, GPV_TIERS, BASE_URL, DATE_FIELD, TOTAL_FIELD, TEXAS_CENTER } from "../utils/constants";
+
+// Custom Hooks
+import { useSavedAccounts, useMetricsData } from "../hooks/useData";
+import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
+import { useRoutePlanning } from "../hooks/useRoutePlanning";
 
 import {
   Bar,
@@ -54,101 +71,6 @@ import {
   YAxis,
 } from "recharts";
 
-// Constants
-const BASE_URL = "https://data.texas.gov/resource/naix-2893.json";
-const DATE_FIELD = "obligation_end_date_yyyymmdd";
-const TOTAL_FIELD = "total_receipts";
-const TEXAS_CENTER = [31.0, -100.0];
-
-const VENUE_TYPES = {
-  fine_dining: { label: "Fine Dining", alcoholPct: 0.35, foodPct: 0.65, desc: "65% Food / 35% Alcohol" },
-  casual_dining: { label: "Casual Dining", alcoholPct: 0.25, foodPct: 0.75, desc: "75% Food / 25% Alcohol" },
-  pub_grill: { label: "Pub / Grill", alcoholPct: 0.45, foodPct: 0.55, desc: "55% Food / 45% Alcohol" },
-  sports_bar: { label: "Sports Bar", alcoholPct: 0.55, foodPct: 0.45, desc: "45% Food / 55% Alcohol" },
-  dive_bar: { label: "Dive Bar / Tavern", alcoholPct: 0.90, foodPct: 0.10, desc: "10% Food / 90% Alcohol" },
-  no_food: { label: "No Food", alcoholPct: 1.0, foodPct: 0.0, desc: "0% Food / 100% Alcohol" },
-};
-
-const GPV_TIERS = [
-  { id: "tier1", label: "$0-50K", color: "#3b82f6" },
-  { id: "tier2", label: "$50-100K", color: "#8b5cf6" },
-  { id: "tier3", label: "$100-250K", color: "#ec4899" },
-  { id: "tier4", label: "$250-500K", color: "#f59e0b" },
-  { id: "tier5", label: "$500K-1M", color: "#10b981" },
-  { id: "tier6", label: "$1M+", color: "#ef4444" },
-];
-
-// Helper functions
-function safeUpper(str) {
-  return (str || "").toString().toUpperCase().trim();
-}
-
-function buildSocrataWhere(searchTerm, cityFilter) {
-  const parts = [];
-  if (searchTerm) {
-    parts.push(
-      `(upper(location_name) like '%${searchTerm}%' OR upper(taxpayer_name) like '%${searchTerm}%' OR upper(location_address) like '%${searchTerm}%')`
-    );
-  }
-  if (cityFilter) {
-    parts.push(`upper(location_city) = '${cityFilter}'`);
-  }
-  return parts.length > 0 ? parts.join(" AND ") : "1=1";
-}
-
-function monthLabelFromDate(d) {
-  if (!d) return "";
-  try {
-    const dt = new Date(d);
-    return dt.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
-  } catch {
-    return "";
-  }
-}
-
-function pseudoLatLng(seed) {
-  const hash = String(seed || "0").split("").reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
-  const lat = 29.0 + ((hash & 0xffff) / 0xffff) * 4.0;
-  const lng = -99.0 + (((hash >> 16) & 0xffff) / 0xffff) * 6.0;
-  return { lat, lng };
-}
-
-function parseAiSections(text) {
-  if (!text) return { owners: "No intelligence found.", locations: "—", details: "—" };
-
-  const norm = text.replace(/[*#]/g, "").trim();
-  const owners = norm.match(/OWNERS:([\s\S]*?)(?=LOCATION COUNT:|$)/i)?.[1]?.trim();
-  const locations = norm.match(/LOCATION COUNT:([\s\S]*?)(?=ACCOUNT DETAILS:|$)/i)?.[1]?.trim();
-  const details = norm.match(/ACCOUNT DETAILS:([\s\S]*?)$/i)?.[1]?.trim();
-
-  return {
-    owners: owners || norm,
-    locations: locations || "—",
-    details: details || "—",
-  };
-}
-
-function parseSavedNotes(raw) {
-  const s = (raw || "").toString();
-  try {
-    const p = JSON.parse(s);
-    return {
-      key: (p?.key || p?.key?.toString() || "").replace(/^KEY:/, "") || (p?.key ? p.key : undefined),
-      notes: Array.isArray(p?.notes) ? p.notes : [],
-      history: Array.isArray(p?.history) ? p.history : [],
-      gpvTier: p?.gpvTier ?? null,
-      activeOpp: p?.activeOpp ?? false,
-      venueType: p?.venueType || null,
-      venueTypeLocked: p?.venueTypeLocked ?? false,
-      aiResponse: p?.aiResponse || "",
-      raw: p,
-    };
-  } catch (e) {
-    const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, venueType: null, venueTypeLocked: false, aiResponse: "", raw: s };
-  }
-}
-
 // -------------------- Component --------------------
 export default function ProspectingApp() {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
@@ -157,26 +79,46 @@ export default function ProspectingApp() {
   const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics
   const [savedSubView, setSavedSubView] = useState("list"); // list | map
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [cityFilter, setCityFilter] = useState("");
-  const [topCitySearch, setTopCitySearch] = useState("");
+  // Custom hooks for data fetching
+  const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
+  const { metricsData, metricsLoading } = useMetricsData();
+  
+  // Search hook
+  const {
+    searchTerm,
+    setSearchTerm,
+    cityFilter,
+    setCityFilter,
+    results,
+    loading: searchLoading,
+    error: searchError,
+    setError: setSearchError,
+    handleSearch,
+  } = useSearch();
 
-  // Personal Metrics from Google Sheets
-  const [metricsData, setMetricsData] = useState(null);
-  const [metricsLoading, setMetricsLoading] = useState(false);
+  // Top leaders hook
+  const {
+    topCitySearch,
+    setTopCitySearch,
+    topAccounts,
+    loading: topLoading,
+    error: topError,
+    setError: setTopError,
+    handleTopSearch,
+  } = useTopLeaders();
 
-  const [results, setResults] = useState([]);
-  const [topAccounts, setTopAccounts] = useState([]);
+  // Combine loading and error states for backward compatibility
+  const loading = searchLoading || topLoading;
+  const error = searchError || topError;
+  const setError = (err) => {
+    setSearchError(err);
+    setTopError(err);
+  };
 
+  const [savedSearchTerm, setSavedSearchTerm] = useState("");
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   const [venueType, setVenueType] = useState("casual_dining");
-
-  // Saved (Neon)
-  const [savedAccounts, setSavedAccounts] = useState([]);
-  const [savedSearchTerm, setSavedSearchTerm] = useState("");
 
   // AI
   const [aiLoading, setAiLoading] = useState(false);
@@ -222,131 +164,20 @@ export default function ProspectingApp() {
   const [manualSearching, setManualSearching] = useState(false);
   const manualSearchTimeout = useRef(null);
 
-  // ---------- Load saved accounts from Neon ----------
-  useEffect(() => {
-    const fetchSaved = async () => {
-      try {
-        const res = await fetch("/api/accounts", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        setSavedAccounts(Array.isArray(data) ? data : []);
-      } catch {
-        // ignore
-      }
-    };
-    fetchSaved();
-  }, []);
-
-  // ---------- Load Personal Metrics ----------
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      if (viewMode !== "metrics") return;
-      if (metricsData) return; // already loaded
-      
-      setMetricsLoading(true);
-      try {
-        const res = await fetch("/api/sheets", { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to fetch metrics");
-        const json = await res.json();
-        setMetricsData(json || {});
-      } catch (err) {
-        console.error("Error loading metrics:", err);
-      } finally {
-        setMetricsLoading(false);
-      }
-    };
-    fetchMetrics();
-  }, [viewMode, metricsData]);
-
-  // ---------- Search ----------
-  const handleSearch = async (e) => {
-    e?.preventDefault?.();
+  // Wrapper for handleSearch to clear state
+  const wrappedHandleSearch = async (e) => {
     setError("");
     setSelectedEstablishment(null);
     setAiResponse("");
-
-    const s = safeUpper(searchTerm);
-    if (!s) return;
-
-    setLoading(true);
-    try {
-      const c = safeUpper(cityFilter);
-
-      const where = buildSocrataWhere(s, c);
-      const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
-        `${DATE_FIELD} DESC`
-      )}&$limit=100`;
-
-      const res = await fetch(`${BASE_URL}${query}`);
-      if (!res.ok) throw new Error(`Texas data error (${res.status})`);
-
-      const data = await res.json();
-
-      // de-dupe by taxpayer + location
-      const unique = [];
-      const seen = new Set();
-      for (const item of Array.isArray(data) ? data : []) {
-        const key = `${item.taxpayer_number}-${item.location_number}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(item);
-        }
-      }
-
-      setResults(unique);
-    } catch (err) {
-      setError(err?.message || "Search failed.");
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
+    await handleSearch(e);
   };
 
-  // ---------- Top leaders ----------
-  const handleTopSearch = async (e) => {
-    e?.preventDefault?.();
+  // Wrapper for handleTopSearch to clear state
+  const wrappedHandleTopSearch = async (e) => {
     setError("");
     setSelectedEstablishment(null);
     setAiResponse("");
-    setTopAccounts([]);
-
-    const input = safeUpper(topCitySearch);
-    if (!input) return;
-
-    setLoading(true);
-    try {
-      const isZip = /^\d{5}$/.test(input);
-
-      // last 12 months
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      const dateString = oneYearAgo.toISOString().split("T")[0] + "T00:00:00.000";
-
-      const loc = isZip ? `location_zip = '${input}'` : `upper(location_city) = '${input}'`;
-
-      const query =
-        `?$select=location_name, location_address, location_city, location_zip, taxpayer_name, taxpayer_number, location_number, sum(${TOTAL_FIELD}) as annual_sales, count(${TOTAL_FIELD}) as months_count` +
-        `&$where=${encodeURIComponent(`${loc} AND ${DATE_FIELD} > '${dateString}'`)}` +
-        `&$group=location_name, location_address, location_city, location_zip, taxpayer_name, taxpayer_number, location_number` +
-        `&$order=${encodeURIComponent("annual_sales DESC")}` +
-        `&$limit=50`;
-
-      const res = await fetch(`${BASE_URL}${query}`);
-      if (!res.ok) throw new Error(`Texas data error (${res.status})`);
-      const data = await res.json();
-
-      const normalized = (Array.isArray(data) ? data : []).map((a) => ({
-        ...a,
-        annual_sales: Number(a.annual_sales || 0),
-        avg_monthly_volume: Number(a.annual_sales || 0) / (Number(a.months_count || 12) || 12),
-      }));
-
-      setTopAccounts(normalized);
-    } catch (err) {
-      setError(err?.message || "Leaders lookup failed.");
-    } finally {
-      setLoading(false);
-    }
+    await handleTopSearch(e);
   };
 
   // ---------- Select + load history ----------
@@ -424,8 +255,7 @@ export default function ProspectingApp() {
         if (existing && existing.id) {
           await fetch(`/api/accounts?id=${existing.id}`, { method: "DELETE" });
         }
-        const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-        setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+        await refreshSavedAccounts();
       } catch (err) {
         // ignore
       }
@@ -520,8 +350,7 @@ export default function ProspectingApp() {
       if (!res.ok) throw new Error("Save failed.");
 
       // Reload saved
-      const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-      setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+      await refreshSavedAccounts();
     } catch (err) {
       setError(err?.message || "Could not save.");
     }
@@ -673,8 +502,7 @@ export default function ProspectingApp() {
         if (!res.ok) throw new Error("Auto-save failed");
         
         const created = await res.json();
-        const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-        setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+        await refreshSavedAccounts();
         
         // Update selected establishment with new ID
         setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, id: created.id } } : s);
@@ -723,8 +551,7 @@ export default function ProspectingApp() {
         }
       } catch {}
 
-      const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-      setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+      await refreshSavedAccounts();
       setCurrentNote("");
     } catch (err) {
       setError(err?.message || "Could not save note.");
@@ -756,8 +583,8 @@ export default function ProspectingApp() {
       const body = await res.json();
       setNotesList(Array.isArray(body.notes) ? body.notes : []);
 
-      const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-      setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+      await refreshSavedAccounts();
+      const refreshed = savedAccounts;
       try {
         const refreshedRow = refreshed.find((r) => r.id === saved.id);
         if (refreshedRow) {
@@ -1156,8 +983,7 @@ export default function ProspectingApp() {
                 body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
               }).then(async (res) => {
                 if (res.ok) {
-                  const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
-                  setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+                  await refreshSavedAccounts();
                 }
               }).catch(() => {});
             } catch {}
@@ -1203,8 +1029,7 @@ export default function ProspectingApp() {
           body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
         }).then(async (res) => {
           if (res.ok) {
-            const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
-            setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+            await refreshSavedAccounts();
           }
         }).catch(() => {}).finally(() => {
           // Clear flag after save completes (with slight delay to ensure state is synced)
@@ -1407,8 +1232,7 @@ export default function ProspectingApp() {
           try {
             // Delete the account (notes are stored in the same row, so they're deleted automatically)
             await fetch(`/api/accounts?id=${data.id}`, { method: 'DELETE' });
-            const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
-            setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+            await refreshSavedAccounts();
             // Clear selected if it was the deleted account
             if (selectedEstablishment?.info?.id === data.id) {
               setSelectedEstablishment(null);
@@ -1457,8 +1281,7 @@ export default function ProspectingApp() {
         });
         if (!res.ok) throw new Error("Could not update active flag");
 
-        const refreshed = await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json());
-        setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+        await refreshSavedAccounts();
 
         setSelectedActiveOpp(notesObj.activeOpp || false);
         setNotesOwner({ id: saved.id, key: parsed.key || null });
@@ -1572,7 +1395,7 @@ export default function ProspectingApp() {
               />
             ) : (
               <SearchForm
-                onSubmit={viewMode === "search" ? handleSearch : handleTopSearch}
+                onSubmit={viewMode === "search" ? wrappedHandleSearch : wrappedHandleTopSearch}
                 searchTerm={viewMode === "search" ? searchTerm : topCitySearch}
                 onSearchChange={(e) =>
                   viewMode === "search"
@@ -1788,8 +1611,7 @@ export default function ProspectingApp() {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                           if (!res.ok) throw new Error('Save failed');
                           const created = await res.json();
-                          const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
-                          setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+                          await refreshSavedAccounts();
                           setManualAddOpen(false);
                           setManualQuery('');
                           setManualResults([]);
@@ -2012,8 +1834,7 @@ export default function ProspectingApp() {
                             });
                             if (!res.ok) throw new Error('Failed to update coordinates');
                             const updated = await res.json();
-                            const refreshed = await fetch('/api/accounts', { cache: 'no-store' }).then((r) => r.json());
-                            setSavedAccounts(Array.isArray(refreshed) ? refreshed : []);
+                            await refreshSavedAccounts();
                             setSelectedEstablishment((s) => s ? { ...s, info: { ...s.info, lat: coordLat, lng: coordLng } } : s);
                             setCoordSaved(true);
                             setTimeout(() => setCoordSaved(false), 2500);

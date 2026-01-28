@@ -37,3 +37,52 @@ export function pseudoLatLng(seed) {
   const lng = -95.5 - ((h % 200) / 200) * 3.0;
   return [lat, lng];
 }
+
+export function parseSavedNotes(raw) {
+  const s = (raw || "").toString();
+  try {
+    const p = JSON.parse(s);
+    return {
+      key: (p?.key || p?.key?.toString() || "").replace(/^KEY:/, "") || (p?.key ? p.key : undefined),
+      notes: Array.isArray(p?.notes) ? p.notes : [],
+      history: Array.isArray(p?.history) ? p.history : [],
+      gpvTier: p?.gpvTier ?? null,
+      activeOpp: p?.activeOpp ?? false,
+      venueType: p?.venueType || null,
+      venueTypeLocked: p?.venueTypeLocked ?? false,
+      aiResponse: p?.aiResponse || "",
+      raw: p,
+    };
+  } catch (e) {
+    const m = s.match(/KEY:([^\s",}]+)/);
+    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, venueType: null, venueTypeLocked: false, aiResponse: "", raw: s };
+  }
+}
+
+export function parseAiSections(text) {
+  if (!text) return { owners: "No intelligence found.", locations: "—", details: "—" };
+
+  const norm = text.replace(/[*#]/g, "").trim();
+  const owners = norm.match(/OWNERS:([\s\S]*?)(?=LOCATION COUNT:|$)/i)?.[1]?.trim();
+  const locations = norm.match(/LOCATION COUNT:([\s\S]*?)(?=ACCOUNT DETAILS:|$)/i)?.[1]?.trim();
+  const details = norm.match(/ACCOUNT DETAILS:([\s\S]*?)$/i)?.[1]?.trim();
+
+  return {
+    owners: owners || norm,
+    locations: locations || "—",
+    details: details || "—",
+  };
+}
+
+export function buildSocrataWhere(searchTerm, cityFilter) {
+  const parts = [];
+  if (searchTerm) {
+    parts.push(
+      `(upper(location_name) like '%${searchTerm}%' OR upper(taxpayer_name) like '%${searchTerm}%' OR upper(location_address) like '%${searchTerm}%')`
+    );
+  }
+  if (cityFilter) {
+    parts.push(`upper(location_city) = '${cityFilter}'`);
+  }
+  return parts.length > 0 ? parts.join(" AND ") : "1=1";
+}
