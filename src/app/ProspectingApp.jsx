@@ -167,6 +167,7 @@ export default function ProspectingApp() {
   const [manualCityFilter, setManualCityFilter] = useState("");
   const [manualResults, setManualResults] = useState([]);
   const [manualSelected, setManualSelected] = useState(null);
+  const [manualGpvTier, setManualGpvTier] = useState(null);
   const [manualSearching, setManualSearching] = useState(false);
   const manualSearchTimeout = useRef(null);
 
@@ -303,10 +304,21 @@ export default function ProspectingApp() {
     }
 
     try {
-      // Require AI intel to be loaded before saving a new account
+
+      // If AI is currently running, ask user to wait
       if (aiLoading) {
         setError("Please wait for AI Intelligence to finish loading before saving.");
         return;
+      }
+
+      // If we don't yet have an AI response for this selection, fetch it now so it is saved with the account
+      if (!aiResponse || !aiResponse.trim()) {
+        try {
+          await fetchAiForInfo(info, { updateState: true });
+        } catch (e) {
+          // ignore - we'll still save without AI if it fails
+          console.error('AI fetch before save failed', e);
+        }
       }
 
       // Require GPV tier to be selected before saving a new account
@@ -675,43 +687,39 @@ export default function ProspectingApp() {
   };
 
   // ---------- AI ----------
-  const performIntelligenceLookup = async () => {
-    if (!selectedEstablishment || !selectedEstablishment.info) return;
-    
-    // Skip if AI response is already loaded (e.g., from clicking a saved account)
-    if (aiResponse && aiResponse.trim()) {
-      return;
-    }
-    
-    // Check if this is a saved account with existing AI response
-    const info = selectedEstablishment.info;
+  // Fetch AI text for a given info object (returns the text). Also sets `aiResponse`/`aiLoading` when used with current selection.
+  const fetchAiForInfo = async (info, { updateState = true } = {}) => {
+    if (!info) return "";
+
+    // If this is a saved account with existing AI response, return it
     if (info.id) {
       const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => a.id === info.id);
       if (saved) {
         try {
           const parsed = parseSavedNotes(saved.notes);
           if (parsed?.aiResponse) {
-            setAiResponse(parsed.aiResponse);
-            return; // Don't re-run AI lookup if we have saved response
+            if (updateState) {
+              skipAiLookupRef.current = true;
+              setAiResponse(parsed.aiResponse);
+              setAiLoading(false);
+            }
+            return parsed.aiResponse;
           }
         } catch {}
       }
     }
-    
-    setAiLoading(true);
-    setAiResponse("");
-    
-    try {
-      const src = selectedEstablishment.info;
-      const businessName = src.location_name || src.name || "(unknown)";
-      const city = src.location_city || src.city || "Texas";
-      const taxpayer = src.taxpayer_name || businessName;
 
-      const payload = {
-        name: businessName,
-        city: city,
-        taxpayer: taxpayer,
-      };
+    if (updateState) {
+      setAiLoading(true);
+      setAiResponse("");
+    }
+
+    try {
+      const businessName = info.location_name || info.name || info.taxpayer_name || "(unknown)";
+      const city = info.location_city || info.city || "Texas";
+      const taxpayer = info.taxpayer_name || businessName;
+
+      const payload = { name: businessName, city, taxpayer };
 
       const resp = await fetch(`/api/intel`, {
         method: "POST",
@@ -729,17 +737,28 @@ export default function ProspectingApp() {
 
       if (!resp.ok) {
         const errMsg = bodyJson?.error || bodyJson?.body || bodyText || `Server error ${resp.status}`;
-        setAiResponse(`Error: ${errMsg}`);
-        return;
+        const msg = `Error: ${errMsg}`;
+        if (updateState) setAiResponse(msg);
+        return msg;
       }
 
       const text = (bodyJson && (bodyJson.text || (bodyJson.raw && bodyJson.raw?.candidates?.[0]?.content?.parts?.[0]?.text))) || "";
-      setAiResponse(String(text || "No response received.").trim());
+      const trimmed = String(text || "No response received.").trim();
+      if (updateState) setAiResponse(trimmed);
+      return trimmed;
     } catch (err) {
-      setAiResponse(`Error: ${err?.message || "AI request failed"}`);
+      const msg = `Error: ${err?.message || "AI request failed"}`;
+      if (updateState) setAiResponse(msg);
+      return msg;
     } finally {
-      setAiLoading(false);
+      if (updateState) setAiLoading(false);
     }
+  };
+
+  const performIntelligenceLookup = async () => {
+    if (!selectedEstablishment || !selectedEstablishment.info) return;
+    if (aiResponse && aiResponse.trim()) return;
+    await fetchAiForInfo(selectedEstablishment.info, { updateState: true });
   };
 
   // Auto-trigger AI lookup when an account is selected (but only if no AI response exists)
@@ -1390,6 +1409,7 @@ export default function ProspectingApp() {
                 onAdd={() => {
                   setManualAddOpen((s) => !s);
                   setManualSelected(null);
+                  setManualGpvTier(null);
                   setManualQuery("");
                 }}
                 onPlanRoute={() => {
@@ -1539,6 +1559,7 @@ export default function ProspectingApp() {
                       setManualCityFilter('');
                       setManualResults([]);
                       setManualSelected(null);
+                      setManualGpvTier(null);
                     }}
                     className="bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-[10px] font-bold uppercase"
                   >
@@ -1591,6 +1612,22 @@ export default function ProspectingApp() {
                     className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
                   />
 
+                  <div className="mt-2">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">GPV Tier</div>
+                    <div className="flex gap-2 flex-wrap">
+                      {GPV_TIERS.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => setManualGpvTier(t.id)}
+                          className={`px-3 py-1 rounded-xl text-[11px] font-black uppercase flex items-center gap-2 border ${manualGpvTier === t.id ? 'border-emerald-500 bg-emerald-600/10' : 'border-slate-700'} `}
+                        >
+                          <span style={{width:12,height:12,background:t.color,borderRadius:6,display:'inline-block'}}></span>
+                          <span>{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex gap-2">
                     <button
                       onClick={async () => {
@@ -1598,11 +1635,19 @@ export default function ProspectingApp() {
                         const info = manualSelected || {};
                         const name = (info.name || '').trim() || 'Manual Account';
                         const address = (info.address || '').trim();
-                        
+
+                        // Run AI for this manual info so the response is saved with the account
+                        let aiText = "";
+                        try {
+                          aiText = await fetchAiForInfo({ location_name: name, location_city: manualCityFilter || '', taxpayer_name: name }, { updateState: true });
+                        } catch (e) {
+                          console.error('AI fetch for manual save failed', e);
+                        }
+
                         // Use coordinates from Google Places if available, otherwise geocode
                         let lat = info.lat;
                         let lng = info.lng;
-                        
+
                         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
                           // Fallback to pseudo coords if no valid coordinates
                           const pseudo = pseudoLatLng(name || address || Date.now());
@@ -1615,7 +1660,7 @@ export default function ProspectingApp() {
                           address,
                           lat,
                           lng,
-                          notes: JSON.stringify({ manual: true })
+                          notes: JSON.stringify({ manual: true, gpvTier: manualGpvTier || selectedGpvTier || null, aiResponse: aiText || aiResponse || "" })
                         };
                         try {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -1626,6 +1671,9 @@ export default function ProspectingApp() {
                           setManualQuery('');
                           setManualResults([]);
                           setManualSelected(null);
+                          setManualGpvTier(null);
+                          // restore selected gpv tier for UI so pin color matches immediately
+                          setSelectedGpvTier(manualGpvTier || selectedGpvTier || null);
                           // open the newly created account in the detail panel with proper ID so SaveButton shows as saved
                           setSelectedEstablishment({ 
                             info: { 
@@ -1639,8 +1687,6 @@ export default function ProspectingApp() {
                             }, 
                             history: [] 
                           });
-                          // Trigger AI lookup for the new account
-                          performIntelligenceLookup();
                         } catch (err) {
                           setError(err?.message || 'Could not save account.');
                         }
@@ -1649,7 +1695,7 @@ export default function ProspectingApp() {
                     >
                       Save Account
                     </button>
-                    <button onClick={() => setManualAddOpen(false)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
+                    <button onClick={() => { setManualAddOpen(false); setManualGpvTier(null); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
                   </div>
                 </div>
               </div>
