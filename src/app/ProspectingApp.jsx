@@ -1656,10 +1656,29 @@ export default function ProspectingApp() {
                   <div className="flex gap-2">
                     <button
                       onClick={async () => {
-                        // Prepare payload and save
+                        // Prepare payload and save (mirror validations from toggleSaveAccount)
                         const info = manualSelected || {};
                         const name = (info.name || '').trim() || 'Manual Account';
                         const address = (info.address || '').trim();
+
+                        // Require AI to not already be running
+                        if (aiLoading) {
+                          setError('Please wait for AI Intelligence to finish loading before saving.');
+                          return;
+                        }
+
+                        // Require GPV tier selection
+                        const chosenTier = manualGpvTier || selectedGpvTier;
+                        if (!chosenTier) {
+                          setError('Please select a GPV Tier before saving this account.');
+                          return;
+                        }
+
+                        // Require venue type
+                        if (!venueType) {
+                          setError('Please select an Account Type before saving this account.');
+                          return;
+                        }
 
                         // Run AI for this manual info so the response is saved with the account
                         let aiText = "";
@@ -1685,7 +1704,7 @@ export default function ProspectingApp() {
                           address,
                           lat,
                           lng,
-                          notes: JSON.stringify({ manual: true, gpvTier: manualGpvTier || selectedGpvTier || null, aiResponse: aiText || aiResponse || "" })
+                          notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked, aiResponse: aiText || aiResponse || "" })
                         };
                         try {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -1698,7 +1717,7 @@ export default function ProspectingApp() {
                           setManualSelected(null);
                           setManualGpvTier(null);
                           // restore selected gpv tier for UI so pin color matches immediately
-                          setSelectedGpvTier(manualGpvTier || selectedGpvTier || null);
+                          setSelectedGpvTier(chosenTier);
                           // open the newly created account in the detail panel with proper ID so SaveButton shows as saved
                           setSelectedEstablishment({ 
                             info: { 
@@ -1891,7 +1910,8 @@ export default function ProspectingApp() {
                         try {
                           const notes = selectedEstablishment?.info?.notes || '';
                           const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
-                          if (parsed?.manual) {
+                          const isSavedAccount = !!selectedEstablishment?.info?.id;
+                          if (isSavedAccount) {
                             return (
                               <div className="mt-2 text-right">
                                 {manualForecastEditing ? (
@@ -1940,7 +1960,7 @@ export default function ProspectingApp() {
                                     </button>
                                     <button onClick={() => { setManualForecastEditing(false); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
                                   </div>
-                                ) : (
+                                  ) : (
                                   <div className="flex items-center gap-2 justify-end">
                                     <div className="text-[12px] font-black text-emerald-400">{formatCurrency(stats?.total || 0)}</div>
                                     <button onClick={() => setManualForecastEditing(true)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit</button>
