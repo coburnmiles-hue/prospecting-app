@@ -840,6 +840,10 @@ export default function ProspectingApp() {
         if (mapInstance.current) {
           mapInstance.current.remove();
           mapInstance.current = null;
+          // Clear any existing markers when the map instance is torn down to avoid
+          // holding references to removed Leaflet objects which can cause reuse issues
+          markersRef.current = {};
+          mapInitializedRef.current = false;
         }
       } catch {
         // ignore
@@ -849,12 +853,21 @@ export default function ProspectingApp() {
   }, [savedSubView]);
 
   const updateMarkers = () => {
-    if (!mapInstance.current || !window.L) return;
-    const L = window.L;
+    try {
+      if (!mapInstance.current || !window.L) return;
+      const L = window.L;
+
+      console.debug("updateMarkers: savedAccounts length", Array.isArray(savedAccounts) ? savedAccounts.length : 0, "visibleTiers", visibleTiers.size);
 
     const bounds = L.latLngBounds([]);
 
     const currentRows = (Array.isArray(savedAccounts) ? savedAccounts : []);
+    // If the saved list is temporarily empty but markers already exist, keep them until
+    // a non-empty list arrives to avoid flicker/removal caused by transient refreshes.
+    if (currentRows.length === 0 && Object.keys(markersRef.current || {}).length > 0) {
+      console.debug("updateMarkers: savedAccounts empty but markers exist; preserving existing markers until next update.");
+      return;
+    }
     const pins = currentRows.map((row) => {
       // Row has lat/lng saved, but fall back to pseudo if missing. Prefer the stored KEY (taxpayer-location)
       const lat = Number(row.lat);
@@ -867,29 +880,45 @@ export default function ProspectingApp() {
     });
 
     const zoomLevel = Math.max(1, Math.round(mapInstance.current.getZoom() || 12));
+    // Log a few sample rows for debugging
+    if (currentRows.length > 0) {
+      console.debug("updateMarkers samples:", currentRows.slice(0,3).map(r => ({id: r.id, name: r.name, lat: r.lat, lng: r.lng}))); 
+    }
 
     // Track keys that should remain after this update
     const remainingKeys = new Set();
 
     pins.forEach((row) => {
+      if (!Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lng))) {
+        console.debug("Skipping marker with invalid coords", row.id, row.name, row.lat, row.lng);
+        return;
+      }
       // Determine pin color by GPV tier if present
       const parsed = parseSavedNotes(row.notes);
       const tier = parsed?.gpvTier || null;
       
       // Skip this pin if its tier is not visible
-      if (tier && !visibleTiers.has(tier)) return;
+      if (tier && !visibleTiers.has(tier)) {
+        console.debug("Skipping marker due to hidden tier", row.id, row.name, tier);
+        return;
+      }
       
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
-      // Scale icon size with zoom (smaller when zoomed out)
-      const base = 48; // px at reference zoom
-      const size = Math.max(12, Math.min(base, Math.round(base * (zoomLevel / 12))));
+      // Scale icon size so pins get smaller as zoom increases.
+      const base = 36; // px at reference zoom
+      const inv = 12 / Math.max(1, zoomLevel);
+      const scale = Math.max(0.4, Math.min(1.2, inv));
+      const size = Math.max(10, Math.min(base, Math.round(base * scale)));
 
       // Simple escape for labels
       const esc = (s) => String(s || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
       const labelHtml = esc(row.name || "");
+      // Only show labels when zoom is sufficiently close to avoid clutter
+      const LABEL_ZOOM_THRESHOLD = 10;
+      const showLabel = zoomLevel >= LABEL_ZOOM_THRESHOLD;
 
       const markerIcon = L.divIcon({
         className: "custom-div-icon",
@@ -901,7 +930,7 @@ export default function ProspectingApp() {
                 <circle cx="12" cy="10" r="3"></circle>
               </svg>
             </div>
-            <div style="margin-top:4px;color:#fff;font-size:11px;font-weight:700;text-align:center;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;">
+            <div style="margin-top:4px;color:#fff;font-size:11px;font-weight:700;text-align:center;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;display:${showLabel ? 'block' : 'none'};">
               ${labelHtml}
             </div>
           </div>
@@ -918,8 +947,9 @@ export default function ProspectingApp() {
         try {
           marker.setIcon(markerIcon);
           marker.setLatLng([row.lat, row.lng]);
-        } catch (e) {}
+        } catch (e) { console.error('Failed to update existing marker', e); }
       } else {
+        console.debug('Creating marker', key, row.name, row.lat, row.lng);
         marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
 
         // Attach click handler for new markers
@@ -942,8 +972,8 @@ export default function ProspectingApp() {
             setCoordLat(row.lat || 0);
             setCoordLng(row.lng || 0);
             setCoordEditorOpen(true);
-            try { marker.openPopup(); } catch (e) {}
-            setTimeout(() => { try { marker.openPopup(); } catch (e) {} }, 120);
+            try { marker.openPopup(); } catch (e) { console.error('openPopup failed', e); }
+              setTimeout(() => { try { marker.openPopup(); } catch (e) { console.error('openPopup retry failed', e); } }, 120);
           } catch (e) {}
         });
       }
@@ -1039,6 +1069,9 @@ export default function ProspectingApp() {
         }
         mapInitializedRef.current = true;
       }
+    }
+    } catch (err) {
+      console.error("updateMarkers error:", err);
     }
   };
 
