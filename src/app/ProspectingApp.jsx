@@ -56,6 +56,9 @@ import {
 } from "../utils/formatters";
 import { VENUE_TYPES, GPV_TIERS, BASE_URL, DATE_FIELD, TOTAL_FIELD, TEXAS_CENTER } from "../utils/constants";
 
+// Environment keys (exposed to client must be NEXT_PUBLIC_*)
+const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || null;
+
 // Custom Hooks
 import { useSavedAccounts, useMetricsData } from "../hooks/useData";
 import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
@@ -71,18 +74,11 @@ import {
   YAxis,
 } from "recharts";
 
-// -------------------- Component --------------------
 export default function ProspectingApp() {
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
-  const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
-
-  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics
-  const [savedSubView, setSavedSubView] = useState("list"); // list | map
-
   // Custom hooks for data fetching
   const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
   const { metricsData, metricsLoading } = useMetricsData();
-  
+
   // Search hook
   const {
     searchTerm,
@@ -139,7 +135,6 @@ export default function ProspectingApp() {
   const [venueTypeLocked, setVenueTypeLocked] = useState(false);
   const savingLockStateRef = useRef(false);
   const skipAiLookupRef = useRef(false);
-  const ignoreNextSelectionClearRef = useRef(false);
 
   // Route planning
   const [routePlanMode, setRoutePlanMode] = useState(false);
@@ -156,6 +151,11 @@ export default function ProspectingApp() {
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
 
+  // Saved view inside the Saved tab: 'list' | 'map' | 'info'
+  const [savedSubView, setSavedSubView] = useState("list");
+  // Primary view mode: 'search' | 'top' | 'saved' | 'metrics'
+  const [viewMode, setViewMode] = useState("search");
+
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
   const [coordLng, setCoordLng] = useState(0);
@@ -170,17 +170,7 @@ export default function ProspectingApp() {
   const [manualSelected, setManualSelected] = useState(null);
   const [manualGpvTier, setManualGpvTier] = useState(null);
   const [manualSearching, setManualSearching] = useState(false);
-  const [manualForecastOverride, setManualForecastOverride] = useState(null);
-  const [manualForecastEditing, setManualForecastEditing] = useState(false);
   const manualSearchTimeout = useRef(null);
-
-  // Debug: log selection and edit state changes in dev for troubleshooting
-  useEffect(() => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('DEBUG: manualForecastEditing ->', manualForecastEditing);
-    }
-  }, [manualForecastEditing]);
-
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') {
       console.log('DEBUG: selectedEstablishment ->', selectedEstablishment ? { id: selectedEstablishment.info?.id, name: selectedEstablishment.info?.location_name } : null);
@@ -978,12 +968,6 @@ export default function ProspectingApp() {
 
   // ---------- Derived ----------
   const stats = useMemo(() => {
-    // If a manual forecast override exists for this account, use it as the total
-    if (typeof manualForecastOverride === "number" && manualForecastOverride >= 0) {
-      const cfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
-      return { avgAlc: 0, estFood: 0, total: manualForecastOverride, cfg };
-    }
-
     if (!selectedEstablishment?.history?.length) return null;
     const h = selectedEstablishment.history;
     const filtered = h.filter((m) => m.total > 0);
@@ -993,31 +977,7 @@ export default function ProspectingApp() {
     return { avgAlc, estFood, total: avgAlc + estFood, cfg };
   }, [selectedEstablishment, venueType]);
 
-  // Load manual forecast override from saved notes when selection changes
-  useEffect(() => {
-    try {
-      const notes = selectedEstablishment?.info?.notes || "";
-      const parsed = typeof notes === "string" ? JSON.parse(notes) : notes;
-      if (parsed && typeof parsed.manualForecast === "number") {
-        setManualForecastOverride(parsed.manualForecast);
-      } else {
-        setManualForecastOverride(null);
-      }
-      if (ignoreNextSelectionClearRef.current) {
-        // Ignore this automatic clear because user interaction intends to open editor
-        ignoreNextSelectionClearRef.current = false;
-      } else {
-        setManualForecastEditing(false);
-      }
-    } catch (e) {
-      setManualForecastOverride(null);
-      if (ignoreNextSelectionClearRef.current) {
-        ignoreNextSelectionClearRef.current = false;
-      } else {
-        setManualForecastEditing(false);
-      }
-    }
-  }, [selectedEstablishment]);
+  
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -1929,98 +1889,6 @@ export default function ProspectingApp() {
 
                     <div className="flex flex-col">
                       <ForecastCard total={stats?.total || 0} />
-                      {/* Always-visible Edit shortcut to ensure users can find forecast control */}
-                      {selectedEstablishment && selectedEstablishment.info && (
-                        <div className="mt-2 text-right">
-                          {!manualForecastEditing && (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => { e.stopPropagation(); ignoreNextSelectionClearRef.current = true; console.log('Edit Forecast mousedown'); setTimeout(() => setManualForecastEditing(true), 0); }}
-                              onClick={(e) => { e.stopPropagation(); console.log('Edit Forecast click'); }}
-                              style={{ zIndex: 1000, pointerEvents: 'auto' }}
-                              className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase"
-                            >
-                              Edit Forecast
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {(() => {
-                        try {
-                          const notes = selectedEstablishment?.info?.notes || '';
-                          const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
-                          const isSavedAccount = !!selectedEstablishment?.info?.id;
-                          // Show edit control for any selected account (saved or not)
-                          if (selectedEstablishment && selectedEstablishment.info) {
-                            return (
-                              <div className="mt-2 text-right">
-                                {manualForecastEditing ? (
-                                  <div className="flex items-center gap-2 justify-end">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      value={manualForecastOverride != null ? manualForecastOverride : ''}
-                                      onChange={(e) => setManualForecastOverride(e.target.value === '' ? null : Number(e.target.value))}
-                                      className="w-32 bg-[#020617] border border-slate-700 text-[12px] font-bold px-3 py-2 rounded-xl"
-                                    />
-                                    <button type="button"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        // Persist manualForecastOverride to saved row if saved, otherwise just close editor
-                                        setManualForecastEditing(false);
-                                        if (!selectedEstablishment?.info) return;
-                                        const id = selectedEstablishment.info.id;
-                                        const value = Number(manualForecastOverride) || 0;
-                                        try {
-                                          if (id) {
-                                            // Patch saved account notes
-                                            const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => a.id === id);
-                                            let parsedSaved = {};
-                                            try { parsedSaved = parseSavedNotes(saved.notes) || {}; } catch {};
-                                            parsedSaved.manualForecast = value;
-                                            await fetch(`/api/accounts?id=${id}`, {
-                                              method: 'PATCH',
-                                              headers: { 'Content-Type': 'application/json' },
-                                              body: JSON.stringify({ notes: JSON.stringify(parsedSaved) }),
-                                            });
-                                            await refreshSavedAccounts();
-                                            // refresh selectedEstablishment notes
-                                            setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, notes: JSON.stringify(parsedSaved) } } : s);
-                                          } else {
-                                            // Not saved yet - just keep override in state
-                                            // nothing else to do
-                                          }
-                                        } catch (err) {
-                                          setError(err?.message || 'Could not save forecast.');
-                                        }
-                                      }}
-                                      className="bg-emerald-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase"
-                                    >
-                                      Save
-                                    </button>
-                                    <button type="button" onClick={(e) => { e.stopPropagation(); setManualForecastEditing(false); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
-                                  </div>
-                                  ) : (
-                                  <div className="flex items-center gap-2 justify-end">
-                                    <div className="text-[12px] font-black text-emerald-400">{formatCurrency(stats?.total || 0)}</div>
-                                    <button
-                                      type="button"
-                                      onMouseDown={(e) => { e.stopPropagation(); ignoreNextSelectionClearRef.current = true; console.log('Inline Edit mousedown'); setTimeout(() => setManualForecastEditing(true), 0); }}
-                                      onClick={(e) => { e.stopPropagation(); console.log('Inline Edit click'); }}
-                                      style={{ zIndex: 1000, pointerEvents: 'auto' }}
-                                      className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase"
-                                    >
-                                      Edit
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }
-                        } catch (e) {}
-                        return null;
-                      })()}
                     </div>
                   </div>
                 </div>
@@ -2186,63 +2054,7 @@ export default function ProspectingApp() {
       </main>
 
       {/* Small CSS helpers */}
-      {/* Forecast editor overlay (fixed) to avoid parent click interference */}
-      {manualForecastEditing && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40">
-          <div className="pointer-events-auto bg-[#0F172A] p-6 rounded-2xl border border-slate-700 w-[420px]">
-            <h3 className="text-sm font-black text-white mb-3">Edit Monthly Forecast</h3>
-            <div className="flex items-center gap-3 mb-4">
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={manualForecastOverride != null ? manualForecastOverride : ''}
-                onChange={(e) => setManualForecastOverride(e.target.value === '' ? null : Number(e.target.value))}
-                className="w-full bg-[#020617] border border-slate-700 text-[12px] font-bold px-3 py-2 rounded-xl"
-              />
-            </div>
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setManualForecastEditing(false); }}
-                className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  setManualForecastEditing(false);
-                  if (!selectedEstablishment?.info) return;
-                  const id = selectedEstablishment.info.id;
-                  const value = Number(manualForecastOverride) || 0;
-                  try {
-                    if (id) {
-                      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => a.id === id);
-                      let parsedSaved = {};
-                      try { parsedSaved = parseSavedNotes(saved.notes) || {}; } catch {}
-                      parsedSaved.manualForecast = value;
-                      await fetch(`/api/accounts?id=${id}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ notes: JSON.stringify(parsedSaved) }),
-                      });
-                      await refreshSavedAccounts();
-                      setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, notes: JSON.stringify(parsedSaved) } } : s);
-                    }
-                  } catch (err) {
-                    setError(err?.message || 'Could not save forecast.');
-                  }
-                }}
-                className="bg-emerald-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      
 
       <style>{`
         .custom-scroll::-webkit-scrollbar { width: 4px; }
