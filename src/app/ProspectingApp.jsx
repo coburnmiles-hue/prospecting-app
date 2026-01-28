@@ -139,6 +139,7 @@ export default function ProspectingApp() {
   const [venueTypeLocked, setVenueTypeLocked] = useState(false);
   const savingLockStateRef = useRef(false);
   const skipAiLookupRef = useRef(false);
+  const ignoreNextSelectionClearRef = useRef(false);
 
   // Route planning
   const [routePlanMode, setRoutePlanMode] = useState(false);
@@ -172,6 +173,19 @@ export default function ProspectingApp() {
   const [manualForecastOverride, setManualForecastOverride] = useState(null);
   const [manualForecastEditing, setManualForecastEditing] = useState(false);
   const manualSearchTimeout = useRef(null);
+
+  // Debug: log selection and edit state changes in dev for troubleshooting
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('DEBUG: manualForecastEditing ->', manualForecastEditing);
+    }
+  }, [manualForecastEditing]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('DEBUG: selectedEstablishment ->', selectedEstablishment ? { id: selectedEstablishment.info?.id, name: selectedEstablishment.info?.location_name } : null);
+    }
+  }, [selectedEstablishment]);
 
   // Wrapper for handleSearch to clear state
   const wrappedHandleSearch = async (e) => {
@@ -989,10 +1003,19 @@ export default function ProspectingApp() {
       } else {
         setManualForecastOverride(null);
       }
-      setManualForecastEditing(false);
+      if (ignoreNextSelectionClearRef.current) {
+        // Ignore this automatic clear because user interaction intends to open editor
+        ignoreNextSelectionClearRef.current = false;
+      } else {
+        setManualForecastEditing(false);
+      }
     } catch (e) {
       setManualForecastOverride(null);
-      setManualForecastEditing(false);
+      if (ignoreNextSelectionClearRef.current) {
+        ignoreNextSelectionClearRef.current = false;
+      } else {
+        setManualForecastEditing(false);
+      }
     }
   }, [selectedEstablishment]);
 
@@ -1912,7 +1935,7 @@ export default function ProspectingApp() {
                           {!manualForecastEditing && (
                             <button
                               type="button"
-                              onMouseDown={(e) => { e.stopPropagation(); console.log('Edit Forecast mousedown'); setManualForecastEditing(true); }}
+                              onMouseDown={(e) => { e.stopPropagation(); ignoreNextSelectionClearRef.current = true; console.log('Edit Forecast mousedown'); setTimeout(() => setManualForecastEditing(true), 0); }}
                               onClick={(e) => { e.stopPropagation(); console.log('Edit Forecast click'); }}
                               style={{ zIndex: 1000, pointerEvents: 'auto' }}
                               className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase"
@@ -1983,7 +2006,7 @@ export default function ProspectingApp() {
                                     <div className="text-[12px] font-black text-emerald-400">{formatCurrency(stats?.total || 0)}</div>
                                     <button
                                       type="button"
-                                      onMouseDown={(e) => { e.stopPropagation(); console.log('Inline Edit mousedown'); setManualForecastEditing(true); }}
+                                      onMouseDown={(e) => { e.stopPropagation(); ignoreNextSelectionClearRef.current = true; console.log('Inline Edit mousedown'); setTimeout(() => setManualForecastEditing(true), 0); }}
                                       onClick={(e) => { e.stopPropagation(); console.log('Inline Edit click'); }}
                                       style={{ zIndex: 1000, pointerEvents: 'auto' }}
                                       className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase"
@@ -2163,6 +2186,64 @@ export default function ProspectingApp() {
       </main>
 
       {/* Small CSS helpers */}
+      {/* Forecast editor overlay (fixed) to avoid parent click interference */}
+      {manualForecastEditing && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40">
+          <div className="pointer-events-auto bg-[#0F172A] p-6 rounded-2xl border border-slate-700 w-[420px]">
+            <h3 className="text-sm font-black text-white mb-3">Edit Monthly Forecast</h3>
+            <div className="flex items-center gap-3 mb-4">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={manualForecastOverride != null ? manualForecastOverride : ''}
+                onChange={(e) => setManualForecastOverride(e.target.value === '' ? null : Number(e.target.value))}
+                className="w-full bg-[#020617] border border-slate-700 text-[12px] font-bold px-3 py-2 rounded-xl"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setManualForecastEditing(false); }}
+                className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  setManualForecastEditing(false);
+                  if (!selectedEstablishment?.info) return;
+                  const id = selectedEstablishment.info.id;
+                  const value = Number(manualForecastOverride) || 0;
+                  try {
+                    if (id) {
+                      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => a.id === id);
+                      let parsedSaved = {};
+                      try { parsedSaved = parseSavedNotes(saved.notes) || {}; } catch {}
+                      parsedSaved.manualForecast = value;
+                      await fetch(`/api/accounts?id=${id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ notes: JSON.stringify(parsedSaved) }),
+                      });
+                      await refreshSavedAccounts();
+                      setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, notes: JSON.stringify(parsedSaved) } } : s);
+                    }
+                  } catch (err) {
+                    setError(err?.message || 'Could not save forecast.');
+                  }
+                }}
+                className="bg-emerald-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
