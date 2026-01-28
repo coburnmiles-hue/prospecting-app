@@ -1910,7 +1910,15 @@ export default function ProspectingApp() {
                       {selectedEstablishment && selectedEstablishment.info && (
                         <div className="mt-2 text-right">
                           {!manualForecastEditing && (
-                            <button type="button" onClick={() => { console.log('Edit Forecast clicked'); setManualForecastEditing(true); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit Forecast</button>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => { e.stopPropagation(); console.log('Edit Forecast mousedown'); setManualForecastEditing(true); }}
+                              onClick={(e) => { e.stopPropagation(); console.log('Edit Forecast click'); }}
+                              style={{ zIndex: 1000, pointerEvents: 'auto' }}
+                              className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase"
+                            >
+                              Edit Forecast
+                            </button>
                           )}
                         </div>
                       )}
@@ -1934,7 +1942,8 @@ export default function ProspectingApp() {
                                       className="w-32 bg-[#020617] border border-slate-700 text-[12px] font-bold px-3 py-2 rounded-xl"
                                     />
                                     <button type="button"
-                                      onClick={async () => {
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
                                         // Persist manualForecastOverride to saved row if saved, otherwise just close editor
                                         setManualForecastEditing(false);
                                         if (!selectedEstablishment?.info) return;
@@ -1967,12 +1976,20 @@ export default function ProspectingApp() {
                                     >
                                       Save
                                     </button>
-                                    <button type="button" onClick={() => { setManualForecastEditing(false); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); setManualForecastEditing(false); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
                                   </div>
                                   ) : (
                                   <div className="flex items-center gap-2 justify-end">
                                     <div className="text-[12px] font-black text-emerald-400">{formatCurrency(stats?.total || 0)}</div>
-                                    <button type="button" onClick={() => { console.log('Inline Edit clicked'); setManualForecastEditing(true); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit</button>
+                                    <button
+                                      type="button"
+                                      onMouseDown={(e) => { e.stopPropagation(); console.log('Inline Edit mousedown'); setManualForecastEditing(true); }}
+                                      onClick={(e) => { e.stopPropagation(); console.log('Inline Edit click'); }}
+                                      style={{ zIndex: 1000, pointerEvents: 'auto' }}
+                                      className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase"
+                                    >
+                                      Edit
+                                    </button>
                                   </div>
                                 )}
                               </div>
