@@ -1906,12 +1906,21 @@ export default function ProspectingApp() {
 
                     <div className="flex flex-col">
                       <ForecastCard total={stats?.total || 0} />
+                      {/* Always-visible Edit shortcut to ensure users can find forecast control */}
+                      {selectedEstablishment && selectedEstablishment.info && (
+                        <div className="mt-2 text-right">
+                          {!manualForecastEditing && (
+                            <button onClick={() => setManualForecastEditing(true)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit Forecast</button>
+                          )}
+                        </div>
+                      )}
                       {(() => {
                         try {
                           const notes = selectedEstablishment?.info?.notes || '';
                           const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
                           const isSavedAccount = !!selectedEstablishment?.info?.id;
-                          if (isSavedAccount) {
+                          // Show edit control for any selected account (saved or not)
+                          if (selectedEstablishment && selectedEstablishment.info) {
                             return (
                               <div className="mt-2 text-right">
                                 {manualForecastEditing ? (
