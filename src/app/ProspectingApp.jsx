@@ -1910,7 +1910,7 @@ export default function ProspectingApp() {
                       {selectedEstablishment && selectedEstablishment.info && (
                         <div className="mt-2 text-right">
                           {!manualForecastEditing && (
-                            <button onClick={() => setManualForecastEditing(true)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit Forecast</button>
+                            <button type="button" onClick={() => setManualForecastEditing(true)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit Forecast</button>
                           )}
                         </div>
                       )}
@@ -1933,7 +1933,7 @@ export default function ProspectingApp() {
                                       onChange={(e) => setManualForecastOverride(e.target.value === '' ? null : Number(e.target.value))}
                                       className="w-32 bg-[#020617] border border-slate-700 text-[12px] font-bold px-3 py-2 rounded-xl"
                                     />
-                                    <button
+                                    <button type="button"
                                       onClick={async () => {
                                         // Persist manualForecastOverride to saved row if saved, otherwise just close editor
                                         setManualForecastEditing(false);
@@ -1967,7 +1967,7 @@ export default function ProspectingApp() {
                                     >
                                       Save
                                     </button>
-                                    <button onClick={() => { setManualForecastEditing(false); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
+                                    <button type="button" onClick={() => { setManualForecastEditing(false); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
                                   </div>
                                   ) : (
                                   <div className="flex items-center gap-2 justify-end">
