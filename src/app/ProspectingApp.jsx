@@ -148,6 +148,9 @@ export default function ProspectingApp() {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef({});
+  
+  // GPV Tier visibility
+  const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
 
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
@@ -833,6 +836,10 @@ export default function ProspectingApp() {
       // Determine pin color by GPV tier if present
       const parsed = parseSavedNotes(row.notes);
       const tier = parsed?.gpvTier || null;
+      
+      // Skip this pin if its tier is not visible
+      if (tier && !visibleTiers.has(tier)) return;
+      
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
@@ -925,7 +932,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (savedSubView === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers]);
 
   // Note: popup-based unsave has been removed; saving/unsaving is handled
   // exclusively via the Save button in the account info UI which calls
@@ -1712,12 +1719,36 @@ export default function ProspectingApp() {
               <div className="absolute top-20 right-6 z-30 bg-slate-900/80 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
                 <div className="font-black uppercase text-[10px] text-indigo-300 mb-2">GPV Legend</div>
                 <div className="flex flex-col gap-2">
-                  {GPV_TIERS.map((t) => (
-                    <div key={t.id} className="flex items-center gap-3">
-                      <div style={{ width: 14, height: 14, background: t.color, borderRadius: 6, border: '2px solid #fff' }} />
-                      <div className="text-[11px] font-bold">{t.label}</div>
-                    </div>
-                  ))}
+                  {GPV_TIERS.map((t) => {
+                    const isVisible = visibleTiers.has(t.id);
+                    return (
+                      <div 
+                        key={t.id} 
+                        className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
+                        onClick={() => {
+                          setVisibleTiers(prev => {
+                            const newSet = new Set(prev);
+                            if (newSet.has(t.id)) {
+                              newSet.delete(t.id);
+                            } else {
+                              newSet.add(t.id);
+                            }
+                            return newSet;
+                          });
+                        }}
+                      >
+                        <div style={{ 
+                          width: 14, 
+                          height: 14, 
+                          background: isVisible ? t.color : '#334155', 
+                          borderRadius: 6, 
+                          border: '2px solid #fff',
+                          opacity: isVisible ? 1 : 0.4
+                        }} />
+                        <div className="text-[11px] font-bold" style={{ opacity: isVisible ? 1 : 0.5 }}>{t.label}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
