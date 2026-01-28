@@ -120,6 +120,9 @@ export default function ProspectingApp() {
 
   const [venueType, setVenueType] = useState("casual_dining");
 
+  // Detail view loading (used when loading account history/details)
+  const [detailLoading, setDetailLoading] = useState(false);
+
   // AI
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState("");
@@ -199,7 +202,7 @@ export default function ProspectingApp() {
 
     if (!est?.taxpayer_number || !est?.location_number) return;
 
-    setLoading(true);
+    setDetailLoading(true);
     try {
       const where = `taxpayer_number = '${est.taxpayer_number}' AND location_number = '${est.location_number}'`;
       const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
@@ -231,7 +234,7 @@ export default function ProspectingApp() {
     } catch (err) {
       setError(err?.message || "Could not load account details.");
     } finally {
-      setLoading(false);
+      setDetailLoading(false);
     }
   };
 
