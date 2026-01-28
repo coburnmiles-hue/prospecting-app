@@ -9,10 +9,49 @@ export async function GET(req) {
     }
 
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-    if (!apiKey) {
-      console.error('GOOGLE_PLACES_API_KEY not set');
-      return Response.json({ error: 'Places API key not configured' }, { status: 500 });
-    }
+      if (!apiKey) {
+        // Fallback to Nominatim (OpenStreetMap) when no Google Places key is configured.
+        try {
+          let searchQuery = query.trim();
+          if (city && city.trim()) {
+            searchQuery += ` ${city.trim()} TX`;
+          } else {
+            searchQuery += ' Texas';
+          }
+
+          const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=20&q=${encodeURIComponent(
+            searchQuery
+          )}`;
+
+          const nomRes = await fetch(nomUrl, {
+            headers: {
+              // Set a sensible User-Agent per Nominatim usage policy
+              'User-Agent': 'prospecting-app',
+            },
+          });
+
+          if (!nomRes.ok) {
+            const errText = await nomRes.text().catch(() => '');
+            console.error('Nominatim error', nomRes.status, errText);
+            return Response.json({ error: `Places fallback error: ${nomRes.status}` }, { status: nomRes.status });
+          }
+
+          const nomData = await nomRes.json();
+          const results = (Array.isArray(nomData) ? nomData : []).map((place) => ({
+            name: (place.display_name || '').split(',')[0] || 'Unnamed',
+            address: place.display_name || '',
+            lat: place.lat ? Number(place.lat) : null,
+            lng: place.lon ? Number(place.lon) : null,
+            place_id: place.osm_id ? String(place.osm_id) : String(place.place_id || ''),
+            types: [place.class, place.type].filter(Boolean),
+          }));
+
+          return Response.json({ results }, { status: 200 });
+        } catch (err) {
+          console.error('Places fallback error:', err);
+          return Response.json({ error: 'Failed to search places' }, { status: 500 });
+        }
+      }
 
     // Build search query - add city filter and restrict to Texas
     let searchQuery = query.trim();
