@@ -147,6 +147,7 @@ export default function ProspectingApp() {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef({});
+  const mapInitializedRef = useRef(false); // prevents repeated fitBounds that cause zoom jumps
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
@@ -822,7 +823,14 @@ export default function ProspectingApp() {
 
       L.control.zoom({ position: "bottomright" }).addTo(mapInstance.current);
 
+      // Update markers initially and whenever zoom changes (to rescale icons)
       updateMarkers();
+      mapInstance.current.on('zoomend', () => {
+        // Rebuild markers so icon sizes update with zoom.
+        updateMarkers();
+      });
+      // Do not mark initialized here; let updateMarkers perform the initial fitBounds
+      // so we can avoid prematurely locking map behavior.
     };
 
     document.head.appendChild(script);
@@ -844,12 +852,10 @@ export default function ProspectingApp() {
     if (!mapInstance.current || !window.L) return;
     const L = window.L;
 
-    Object.values(markersRef.current).forEach((m) => m.remove());
-    markersRef.current = {};
-
     const bounds = L.latLngBounds([]);
 
-    const pins = (Array.isArray(savedAccounts) ? savedAccounts : []).map((row) => {
+    const currentRows = (Array.isArray(savedAccounts) ? savedAccounts : []);
+    const pins = currentRows.map((row) => {
       // Row has lat/lng saved, but fall back to pseudo if missing. Prefer the stored KEY (taxpayer-location)
       const lat = Number(row.lat);
       const lng = Number(row.lng);
@@ -859,6 +865,11 @@ export default function ProspectingApp() {
       const pseudo = pseudoLatLng(seed);
       return { ...row, lat: pseudo.lat, lng: pseudo.lng };
     });
+
+    const zoomLevel = Math.max(1, Math.round(mapInstance.current.getZoom() || 12));
+
+    // Track keys that should remain after this update
+    const remainingKeys = new Set();
 
     pins.forEach((row) => {
       // Determine pin color by GPV tier if present
@@ -871,20 +882,71 @@ export default function ProspectingApp() {
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
+      // Scale icon size with zoom (smaller when zoomed out)
+      const base = 48; // px at reference zoom
+      const size = Math.max(12, Math.min(base, Math.round(base * (zoomLevel / 12))));
+
+      // Simple escape for labels
+      const esc = (s) => String(s || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+
+      const labelHtml = esc(row.name || "");
 
       const markerIcon = L.divIcon({
         className: "custom-div-icon",
-        html: `<div style="width:32px;height:32px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:${halo}0 10px 20px rgba(0,0,0,.35);">
-                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                   <circle cx="12" cy="10" r="3"></circle>
-                 </svg>
-               </div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 32],
+        html: `
+          <div style="display:flex;flex-direction:column;align-items:center;pointer-events:auto;">
+            <div style="width:${size}px;height:${size}px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:${halo}0 10px 20px rgba(0,0,0,.35);">
+              <svg width="${Math.max(8, Math.round(size * 0.35))}" height="${Math.max(8, Math.round(size * 0.35))}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+            <div style="margin-top:4px;color:#fff;font-size:11px;font-weight:700;text-align:center;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;">
+              ${labelHtml}
+            </div>
+          </div>
+        `,
+        iconSize: [size, size + 18],
+        iconAnchor: [Math.round(size / 2), size],
       });
 
-      const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
+      const key = row.id?.toString() || `${row.lat},${row.lng}`;
+
+      // Reuse existing marker if present to avoid removing popups on re-render
+      let marker = markersRef.current[key];
+      if (marker) {
+        try {
+          marker.setIcon(markerIcon);
+          marker.setLatLng([row.lat, row.lng]);
+        } catch (e) {}
+      } else {
+        marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
+
+        // Attach click handler for new markers
+        marker.on('click', () => {
+          try {
+            const parsed = parseSavedNotes(row.notes);
+            const keyParts = parsed?.key ? parsed.key.split('-') : [];
+            setSelectedEstablishment({
+              info: {
+                id: row.id,
+                location_name: row.name || row.location_name,
+                location_address: row.address || row.location_address,
+                taxpayer_number: keyParts[0] || undefined,
+                location_number: keyParts[1] || undefined,
+                lat: row.lat,
+                lng: row.lng,
+              },
+              history: Array.isArray(parsed?.history) ? parsed.history : [],
+            });
+            setCoordLat(row.lat || 0);
+            setCoordLng(row.lng || 0);
+            setCoordEditorOpen(true);
+            try { marker.openPopup(); } catch (e) {}
+            setTimeout(() => { try { marker.openPopup(); } catch (e) {} }, 120);
+          } catch (e) {}
+        });
+      }
 
       const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.address || "")}`;
 
@@ -942,18 +1004,41 @@ export default function ProspectingApp() {
           setCoordLat(row.lat || 0);
           setCoordLng(row.lng || 0);
           setCoordEditorOpen(true);
+
+          // Ensure popup opens reliably even if React re-renders the component.
+          try { marker.openPopup(); } catch (e) {}
+          setTimeout(() => {
+            try { marker.openPopup(); } catch (e) {}
+          }, 120);
         } catch (e) {
           // ignore
         }
       });
 
-      const key = row.id?.toString() || `${row.lat},${row.lng}`;
+      remainingKeys.add(key);
       markersRef.current[key] = marker;
       bounds.extend([row.lat, row.lng]);
     });
 
+    // Remove any markers that were not present in this update
+    Object.keys(markersRef.current).forEach((k) => {
+      if (!remainingKeys.has(k)) {
+        try {
+          markersRef.current[k].remove();
+        } catch (e) {}
+        delete markersRef.current[k];
+      }
+    });
+
     if (pins.length > 0) {
-      mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+      if (!mapInitializedRef.current) {
+        try {
+          mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+        } catch (e) {
+          // ignore fit errors
+        }
+        mapInitializedRef.current = true;
+      }
     }
   };
 
