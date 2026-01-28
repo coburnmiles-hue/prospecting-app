@@ -35,7 +35,7 @@ export function pseudoLatLng(seed) {
   const h = Array.from(seed).reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const lat = 29.7 + ((h % 100) / 100) * 3.5;
   const lng = -95.5 - ((h % 200) / 200) * 3.0;
-  return [lat, lng];
+  return { lat, lng };
 }
 
 export function parseSavedNotes(raw) {
