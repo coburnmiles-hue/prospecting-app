@@ -126,7 +126,7 @@ export default function ProspectingApp() {
 
   // Notes (client only in this version)
   const [currentNote, setCurrentNote] = useState("");
-  const [activityType, setActivityType] = useState("update");
+  const [activityType, setActivityType] = useState("Walk-In");
   const [notesList, setNotesList] = useState([]);
   const [notesExpanded, setNotesExpanded] = useState(false);
   // notesOwner tracks which account the notesList belongs to: { id?: number|null, key?: string }
