@@ -1910,7 +1910,7 @@ export default function ProspectingApp() {
                       {selectedEstablishment && selectedEstablishment.info && (
                         <div className="mt-2 text-right">
                           {!manualForecastEditing && (
-                            <button type="button" onClick={() => setManualForecastEditing(true)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit Forecast</button>
+                            <button type="button" onClick={() => { console.log('Edit Forecast clicked'); setManualForecastEditing(true); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit Forecast</button>
                           )}
                         </div>
                       )}
@@ -1972,7 +1972,7 @@ export default function ProspectingApp() {
                                   ) : (
                                   <div className="flex items-center gap-2 justify-end">
                                     <div className="text-[12px] font-black text-emerald-400">{formatCurrency(stats?.total || 0)}</div>
-                                    <button onClick={() => setManualForecastEditing(true)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit</button>
+                                    <button type="button" onClick={() => { console.log('Inline Edit clicked'); setManualForecastEditing(true); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold uppercase">Edit</button>
                                   </div>
                                 )}
                               </div>
