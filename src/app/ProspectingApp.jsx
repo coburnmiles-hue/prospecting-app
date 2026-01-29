@@ -157,6 +157,38 @@ export default function ProspectingApp() {
   // Primary view mode: 'search' | 'top' | 'saved' | 'metrics'
   const [viewMode, setViewMode] = useState("search");
 
+  // Diagnostic: surface unhandled promise rejections / errors (often from browser extensions)
+  useEffect(() => {
+    const onUnhandled = (e) => {
+      try {
+        console.warn("Global unhandledrejection:", e);
+        const reason = e && e.reason;
+        if (reason) {
+          console.warn("Unhandled reason message:", reason.message || reason);
+          if (reason.stack) console.warn("Unhandled reason stack:", reason.stack);
+          const stackStr = String(reason.stack || "");
+          const extMatch = stackStr.match(/chrome-extension:\/\/([a-p0-9]+)\//i);
+          if (extMatch) console.warn("Likely extension id:", extMatch[1]);
+        }
+      } catch (err) {
+        console.error("Error in unhandledrejection handler", err);
+      }
+    };
+
+    const onError = (ev) => {
+      try {
+        console.warn("Global error event:", ev);
+      } catch (err) {}
+    };
+
+    window.addEventListener("unhandledrejection", onUnhandled);
+    window.addEventListener("error", onError);
+    return () => {
+      window.removeEventListener("unhandledrejection", onUnhandled);
+      window.removeEventListener("error", onError);
+    };
+  }, []);
+
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
   const [coordLng, setCoordLng] = useState(0);
@@ -1533,6 +1565,10 @@ export default function ProspectingApp() {
                 searchTerm={savedSearchTerm}
                 onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
                 onAdd={() => {
+                  console.debug('SavedAccountsHeader onAdd clicked - opening manual add');
+                  // Ensure we're in the saved view and then toggle the manual add panel
+                  setViewMode('saved');
+                  setSavedSubView('list');
                   setManualAddOpen((s) => !s);
                   setManualSelected(null);
                   setManualGpvTier(null);
@@ -1785,6 +1821,8 @@ export default function ProspectingApp() {
                         let aiText = "";
                         try {
                           aiText = await fetchAiForInfo({ location_name: name, location_city: manualCityFilter || '', taxpayer_name: name }, { updateState: true });
+                          console.debug('Manual add: fetched aiText', aiText);
+                          console.debug('Manual add: current aiResponse state', aiResponse);
                         } catch (e) {
                           console.error('AI fetch for manual save failed', e);
                         }
@@ -1807,6 +1845,7 @@ export default function ProspectingApp() {
                           lng,
                           notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked, aiResponse: aiText || aiResponse || "" })
                         };
+                        console.debug('Manual add payload notes preview', payload.notes);
                         try {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                           if (!res.ok) throw new Error('Save failed');
