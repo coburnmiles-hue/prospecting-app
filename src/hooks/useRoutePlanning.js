@@ -24,10 +24,28 @@ export function useRoutePlanning(savedAccounts, mapInstance) {
         };
       });
 
+      // Try to get user's current location as the route origin
+      const getUserLocation = () => new Promise((resolve, reject) => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          (err) => reject(err),
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      });
+
+      let origin = null;
+      try {
+        origin = await getUserLocation();
+      } catch (e) {
+        console.warn('Could not get user location for route origin, falling back to first waypoint', e);
+        if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+      }
+
       const res = await fetch('/api/route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints }),
+        body: JSON.stringify({ origin, waypoints }),
       });
 
       if (!res.ok) {

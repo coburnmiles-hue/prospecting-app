@@ -635,18 +635,40 @@ export default function ProspectingApp() {
         };
       });
 
+      // Try to get user's current location as the route origin
+      const getUserLocation = () => new Promise((resolve, reject) => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          (err) => reject(err),
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      });
+
+      let origin = null;
+      try {
+        origin = await getUserLocation();
+      } catch (e) {
+        console.warn('Could not get user location for route origin, falling back to first waypoint', e);
+        // fall back to first waypoint if available
+        if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+      }
+
       const res = await fetch('/api/route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waypoints }),
+        body: JSON.stringify({ origin, waypoints }),
       });
 
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Route calculation failed');
+        console.error('Route API error response:', body);
+        const msg = body?.error || body?.details || body?.message || 'Route calculation failed';
+        setError(`Route API: ${msg}`);
+        throw new Error(msg);
       }
 
-      const route = await res.json();
+      const route = body;
       setCalculatedRoute(route);
 
       // Reorder selectedForRoute based on optimized waypoint order
@@ -1066,14 +1088,22 @@ export default function ProspectingApp() {
     const onAdd = (e) => {
       try {
         const entry = e?.detail || {};
-        if (!entry) return;
+        if (!entry || entry.id == null) return;
+
         setSelectedForRoute((prev) => {
-          if (entry.id == null) return prev;
           if (prev.includes(entry.id)) {
             const next = prev.filter(id => id !== entry.id);
             setRoutePlanMode(next.length > 0);
             return next;
           } else {
+            // Add new stop: ensure route planning UI is visible
+            try {
+              setViewMode('saved');
+              // Keep the map visible and show routing controls on the side
+              setSavedSubView('map');
+              // Clear any selected account so the details panel doesn't replace the map
+              setSelectedEstablishment(null);
+            } catch {}
             const next = [...prev, entry.id];
             setRoutePlanMode(true);
             return next;
@@ -1102,7 +1132,7 @@ export default function ProspectingApp() {
       window.removeEventListener('prospect:addToRoute', onAdd);
       window.removeEventListener('prospect:viewDetails', onView);
     };
-  }, [setSelectedForRoute, setRoutePlanMode]);
+  }, [setSelectedForRoute, setRoutePlanMode, setViewMode, setSavedSubView]);
 
   // Reflect selectedForRoute state in any open/populated popup buttons
   useEffect(() => {

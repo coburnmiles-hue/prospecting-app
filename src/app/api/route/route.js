@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 
 export async function POST(request) {
   try {
-    const { waypoints } = await request.json();
-    
-    if (!waypoints || !Array.isArray(waypoints) || waypoints.length < 2) {
+    const { waypoints, origin } = await request.json();
+
+    if (!waypoints || !Array.isArray(waypoints) || waypoints.length < 1) {
       return NextResponse.json({ error: "At least 2 waypoints required" }, { status: 400 });
     }
 
@@ -20,12 +20,26 @@ export async function POST(request) {
     }
 
     // Build Directions API request safely with URL-encoded coordinates
-    const origin = `${encodeURIComponent(`${waypoints[0].lat},${waypoints[0].lng}`)}`;
-    const destination = origin; // round-trip
+    // Determine origin: prefer explicit `origin` in payload (server gets user's location), otherwise use first waypoint as origin
+    let originCoord = null;
+    if (origin && typeof origin.lat === 'number' && typeof origin.lng === 'number') {
+      originCoord = origin;
+    } else if (waypoints[0] && typeof waypoints[0].lat === 'number' && typeof waypoints[0].lng === 'number') {
+      originCoord = { lat: Number(waypoints[0].lat), lng: Number(waypoints[0].lng) };
+    }
 
-    const waypointsParam = waypoints.map(w => encodeURIComponent(`${w.lat},${w.lng}`)).join('%7C'); // '|' encoded as %7C
+    if (!originCoord) {
+      return NextResponse.json({ error: 'Origin coordinates required' }, { status: 400 });
+    }
 
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&waypoints=optimize:true%7C${waypointsParam}&key=${encodeURIComponent(apiKey)}`;
+    const originStr = encodeURIComponent(`${originCoord.lat},${originCoord.lng}`);
+    const destinationStr = originStr; // round-trip
+
+    // Build waypoints param using only the stops (do not include origin in the optimization list)
+    const stops = waypoints.map(w => ({ lat: Number(w.lat), lng: Number(w.lng) }));
+    const waypointsParam = stops.map(w => encodeURIComponent(`${w.lat},${w.lng}`)).join('%7C'); // '|' encoded as %7C
+
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destinationStr}&waypoints=optimize:true%7C${waypointsParam}&key=${encodeURIComponent(apiKey)}`;
 
     const response = await fetch(url);
     const data = await response.json();
@@ -59,8 +73,9 @@ export async function POST(request) {
       })),
     });
   } catch (error) {
-    console.error("Route calculation error:", error);
-    return NextResponse.json({ error: "Route calculation failed" }, { status: 500 });
+    console.error("Route calculation error:", error && (error.stack || error.message || error));
+    // Return error details to help diagnose server errors on deployment
+    return NextResponse.json({ error: "Route calculation failed", details: error?.message || String(error) }, { status: 500 });
   }
 }
 
