@@ -964,19 +964,43 @@ export default function ProspectingApp() {
           <a href="${mapsUrl}" target="_blank" style="display:block;text-align:center;background:#4f46e5;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
             Get Directions
           </a>
-          <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${row.lat},${row.lng}" target="_blank" style="display:block;text-align:center;background:#059669;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;">
+          <a href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${row.lat},${row.lng}" target="_blank" style="display:block;text-align:center;background:#059669;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
             Street View
           </a>
+          <button onclick="window.dispatchEvent(new CustomEvent('prospect:viewDetails',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#0b1220;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;margin-bottom:8px;">
+            View Details
+          </button>
+          <button data-prospect-id="${row.id != null ? row.id : ''}" onclick="window.dispatchEvent(new CustomEvent('prospect:addToRoute',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'},lat:${row.lat},lng:${row.lng}}}))" style="display:block;width:100%;text-align:center;background:#111827;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;">
+            Add To Route
+          </button>
         </div>
       `);
 
       // When a marker is clicked, surface the account and open the coord editor
 
   
+      // Open popup and surface account detail; attach popup handler for "Add To Route"
       marker.on('click', () => {
         try {
+          // Fly the map to the pin and open the popup so both actions occur together
+          try {
+            if (mapInstance.current && mapInstance.current.panTo) {
+              mapInstance.current.panTo([row.lat, row.lng]);
+            } else if (mapInstance.current && mapInstance.current.setView) {
+              mapInstance.current.setView([row.lat, row.lng], mapInstance.current.getZoom(), { animate: true });
+            }
+          } catch (e) {
+            // ignore
+          }
+
+          // Open the popup immediately (flyTo will animate concurrently)
+          marker.openPopup();
+
           const parsed = parseSavedNotes(row.notes);
           const keyParts = parsed?.key ? parsed.key.split('-') : [];
+
+          // Set the selected establishment so the detail panel data is ready if user opens it,
+          // but do NOT switch views automatically so the popup remains visible.
           setSelectedEstablishment({
             info: {
               id: row.id,
@@ -989,13 +1013,12 @@ export default function ProspectingApp() {
             },
             history: Array.isArray(parsed?.history) ? parsed.history : [],
           });
-          setCoordLat(row.lat || 0);
-          setCoordLng(row.lng || 0);
-          setCoordEditorOpen(true);
         } catch (e) {
           // ignore
         }
       });
+
+      // Popup buttons dispatch CustomEvents handled globally; no per-popup DOM wiring needed here.
 
       const key = row.id?.toString() || `${row.lat},${row.lng}`;
       markersRef.current[key] = marker;
@@ -1011,6 +1034,65 @@ export default function ProspectingApp() {
     if (savedSubView === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers]);
+
+  // Listen for popup-dispatched custom events from leaflet popup buttons
+  useEffect(() => {
+    const onAdd = (e) => {
+      try {
+        const entry = e?.detail || {};
+        if (!entry) return;
+        setSelectedForRoute((prev) => {
+          if (entry.id == null) return prev;
+          if (prev.includes(entry.id)) {
+            const next = prev.filter(id => id !== entry.id);
+            setRoutePlanMode(next.length > 0);
+            return next;
+          } else {
+            const next = [...prev, entry.id];
+            setRoutePlanMode(true);
+            return next;
+          }
+        });
+      } catch (err) {
+        console.error('addToRoute handler failed', err);
+      }
+    };
+
+    const onView = (e) => {
+      try {
+        const id = e?.detail?.id;
+        if (id != null) {
+          setViewMode('saved');
+          setSavedSubView('info');
+        }
+      } catch (err) {
+        console.error('viewDetails handler failed', err);
+      }
+    };
+
+    window.addEventListener('prospect:addToRoute', onAdd);
+    window.addEventListener('prospect:viewDetails', onView);
+    return () => {
+      window.removeEventListener('prospect:addToRoute', onAdd);
+      window.removeEventListener('prospect:viewDetails', onView);
+    };
+  }, [setSelectedForRoute, setRoutePlanMode]);
+
+  // Reflect selectedForRoute state in any open/populated popup buttons
+  useEffect(() => {
+    try {
+      const buttons = Array.from(document.querySelectorAll('[data-prospect-id]'));
+      buttons.forEach((btn) => {
+        const idAttr = btn.getAttribute('data-prospect-id');
+        if (idAttr == null || idAttr === '') return;
+        const idNum = Number(idAttr);
+        const selected = selectedForRoute.includes(idNum) || selectedForRoute.includes(idAttr);
+        if (selected) btn.classList.add('route-added'); else btn.classList.remove('route-added');
+      });
+    } catch (e) {
+      // ignore
+    }
+  }, [selectedForRoute]);
 
   // Fly map to user's current location (if available)
   const handleMyLocation = () => {
@@ -1927,7 +2009,7 @@ export default function ProspectingApp() {
                 <button
                   onClick={handleMyLocation}
                   title="My location"
-                  className="absolute bottom-10 right-8 z-[9999] bg-slate-800/80 hover:bg-slate-700 p-2.5 rounded-full border border-slate-700 text-slate-200 shadow-lg flex items-center justify-center transition-colors"
+                  className="absolute bottom-12 right-16 z-[9999] bg-slate-800/80 hover:bg-slate-700 p-2.5 rounded-full border border-slate-700 text-slate-200 shadow-lg flex items-center justify-center transition-colors"
                   style={{ backdropFilter: 'blur(4px)', pointerEvents: 'auto' }}
                 >
                   <MapPin size={16} className="text-indigo-300" />
