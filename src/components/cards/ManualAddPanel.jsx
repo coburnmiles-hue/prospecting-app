@@ -27,6 +27,7 @@ export default function ManualAddPanel({
   setSelectedGpvTier,
   setSelectedEstablishment,
   aiResponse,
+  selectedActiveAccount,
 }) {
   return (
     <div className="mt-4 bg-[#0b1220] p-4 rounded-2xl border border-slate-700">
@@ -194,7 +195,7 @@ export default function ManualAddPanel({
                 address,
                 lat,
                 lng,
-                notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked, aiResponse: aiText || aiResponse || "" }),
+                notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, activeAccount: selectedActiveAccount, venueType: venueType, venueTypeLocked: venueTypeLocked, aiResponse: aiText || aiResponse || "" }),
               };
 
               try {

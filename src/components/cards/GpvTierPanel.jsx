@@ -2,7 +2,9 @@ export default function GpvTierPanel({
   gpvTiers,
   selectedGpvTier,
   selectedActiveOpp,
-  onToggleActiveOpp
+  onToggleActiveOpp,
+  selectedActiveAccount,
+  onToggleActiveAccount,
 }) {
   return (
     <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 shadow-xl">
@@ -35,7 +37,7 @@ export default function GpvTierPanel({
             ))}
           </div>
 
-          <div className="ml-4">
+          <div className="ml-4 flex gap-2 items-center">
             <button
               onClick={onToggleActiveOpp}
               className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
@@ -44,6 +46,16 @@ export default function GpvTierPanel({
               style={{ borderColor: selectedActiveOpp ? "#10b981" : "#334155" }}
             >
               Active Opp
+            </button>
+
+            <button
+              onClick={onToggleActiveAccount}
+              className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+                selectedActiveAccount ? "bg-emerald-500 text-white" : "opacity-70"
+              }`}
+              style={{ borderColor: selectedActiveAccount ? "#10b981" : "#334155" }}
+            >
+              Active Account
             </button>
           </div>
         </div>

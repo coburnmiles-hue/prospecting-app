@@ -61,8 +61,17 @@ export function useRoutePlanning(savedAccounts, mapInstance) {
 
         routePolylineRef.current = polyline;
 
-        // Fit map to route bounds
-        mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+        // Fit map to route bounds (only if bounds are valid)
+        try {
+          const bounds = polyline.getBounds && polyline.getBounds();
+          if (bounds && typeof bounds.isValid === 'function' && bounds.isValid()) {
+            mapInstance.current.fitBounds(bounds, { padding: [50, 50] });
+          } else {
+            console.warn('Route polyline bounds invalid, skipping fitBounds');
+          }
+        } catch (e) {
+          console.warn('Failed to fitBounds for route polyline', e);
+        }
       }
 
       return { success: true };

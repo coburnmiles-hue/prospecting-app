@@ -48,6 +48,7 @@ export function parseSavedNotes(raw) {
       history: Array.isArray(p?.history) ? p.history : [],
       gpvTier: p?.gpvTier ?? null,
       activeOpp: p?.activeOpp ?? false,
+      activeAccount: p?.activeAccount ?? false,
       venueType: p?.venueType || null,
       venueTypeLocked: p?.venueTypeLocked ?? false,
       aiResponse: p?.aiResponse || "",
@@ -55,7 +56,7 @@ export function parseSavedNotes(raw) {
     };
   } catch (e) {
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, venueType: null, venueTypeLocked: false, aiResponse: "", raw: s };
+    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, activeAccount: false, venueType: null, venueTypeLocked: false, aiResponse: "", raw: s };
   }
 }
 

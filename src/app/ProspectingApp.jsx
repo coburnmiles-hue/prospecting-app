@@ -137,6 +137,7 @@ export default function ProspectingApp() {
   const [notesOwner, setNotesOwner] = useState({ id: null, key: null });
   const [selectedGpvTier, setSelectedGpvTier] = useState(null);
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
+  const [selectedActiveAccount, setSelectedActiveAccount] = useState(false);
   const [venueTypeLocked, setVenueTypeLocked] = useState(false);
   const savingLockStateRef = useRef(false);
   const skipAiLookupRef = useRef(false);
@@ -156,6 +157,8 @@ export default function ProspectingApp() {
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
+  const [visibleActiveAccounts, setVisibleActiveAccounts] = useState(true);
+  const [showActiveOnly, setShowActiveOnly] = useState(false);
 
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
@@ -396,6 +399,7 @@ export default function ProspectingApp() {
       // Always restore GPV tier, Active Opp flag, and venue type from saved payload if present
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
+        setSelectedActiveAccount(parsed?.activeAccount || false);
       if (parsed?.venueType) {
         setVenueType(parsed.venueType);
       }
@@ -913,24 +917,42 @@ export default function ProspectingApp() {
       const parsed = parseSavedNotes(row.notes);
       const tier = parsed?.gpvTier || null;
       
+      // If 'show only active' is enabled, skip any non-active pins
+      if (showActiveOnly && !parsed?.activeAccount) return;
+
       // Skip this pin if its tier is not visible
       if (tier && !visibleTiers.has(tier)) return;
+      // If this is an Active Account pin and Active Account visibility is off, skip it
+      if (parsed?.activeAccount && !visibleActiveAccounts) return;
       
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
 
-      const markerIcon = L.divIcon({
-        className: "custom-div-icon",
-        html: `<div style="width:32px;height:32px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:${halo}0 10px 20px rgba(0,0,0,.35);">
-                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                   <circle cx="12" cy="10" r="3"></circle>
-                 </svg>
-               </div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 32],
-      });
+      let markerIcon;
+      if (parsed?.activeAccount) {
+        // Bright green pin with $ symbol for Active Account
+        markerIcon = L.divIcon({
+          className: "custom-div-icon",
+          html: `<div style="width:32px;height:32px;border-radius:999px;background:#10b981;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(16,185,129,0.18);">
+                   <div style="font-weight:900;color:#052e16;font-size:16px;line-height:1;">$</div>
+                 </div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+        });
+      } else {
+        markerIcon = L.divIcon({
+          className: "custom-div-icon",
+          html: `<div style="width:32px;height:32px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:${halo}0 10px 20px rgba(0,0,0,.35);">
+                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                     <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                     <circle cx="12" cy="10" r="3"></circle>
+                   </svg>
+                 </div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+        });
+      }
 
       const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
 
@@ -1025,15 +1047,19 @@ export default function ProspectingApp() {
       bounds.extend([row.lat, row.lng]);
     });
 
-    if (pins.length > 0) {
-      mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+    if (pins.length > 0 && bounds && typeof bounds.isValid === 'function' && bounds.isValid()) {
+      try {
+        mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+      } catch (e) {
+        console.warn('fitBounds skipped due to invalid bounds or map state', e);
+      }
     }
   };
 
   useEffect(() => {
     if (savedSubView === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -1299,7 +1325,7 @@ export default function ProspectingApp() {
       }
       
       // Restore chart/history immediately when present
-      if (Array.isArray(parsed.history) && parsed.history.length) {
+          if (Array.isArray(parsed.history) && parsed.history.length) {
         // include DB id and possible taxpayer/location from parsed.key so fetchNotesForSelected can match
         const keyParts = parsed.key ? parsed.key.split("-") : [];
         const taxpayer_number = keyParts[0] || undefined;
@@ -1315,6 +1341,22 @@ export default function ProspectingApp() {
             },
             history: parsed.history,
           });
+          // If the map is visible, zoom to the saved pin and open its popup
+          if (savedSubView === 'map' && mapInstance.current) {
+            try {
+              const markerKey = data.id != null ? data.id.toString() : `${data.lat || ''},${data.lng || ''}`;
+              const marker = markersRef.current[markerKey];
+              if (marker && typeof marker.getLatLng === 'function') {
+                const ll = marker.getLatLng();
+                mapInstance.current.setView([ll.lat, ll.lng], Math.max(mapInstance.current.getZoom(), 14), { animate: true });
+                marker.openPopup();
+              } else if (Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+                mapInstance.current.setView([Number(data.lat), Number(data.lng)], 14, { animate: true });
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
           if (Array.isArray(parsed.notes) && parsed.notes.length) {
             setNotesList(parsed.notes);
             setNotesOwner({ id: data.id, key: parsed.key || null });
@@ -1347,6 +1389,22 @@ export default function ProspectingApp() {
       }
 
       setSelectedEstablishment({ info: { id: data.id, location_name: data.name || "Saved Account", location_address: data.address || "" }, history: [] });
+      // If the map is visible, zoom to the saved pin and open its popup
+      if (savedSubView === 'map' && mapInstance.current) {
+        try {
+          const markerKey = data.id != null ? data.id.toString() : `${data.lat || ''},${data.lng || ''}`;
+          const marker = markersRef.current[markerKey];
+          if (marker && typeof marker.getLatLng === 'function') {
+            const ll = marker.getLatLng();
+            mapInstance.current.setView([ll.lat, ll.lng], Math.max(mapInstance.current.getZoom(), 14), { animate: true });
+            marker.openPopup();
+          } else if (Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+            mapInstance.current.setView([Number(data.lat), Number(data.lng)], 14, { animate: true });
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
       return;
     }
 
@@ -1500,6 +1558,48 @@ export default function ProspectingApp() {
       }
     };
 
+    // Toggle Active Account flag for selected account
+    const toggleActiveAccount = async () => {
+      if (!selectedEstablishment?.info) return;
+      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+        try {
+          const parsed = parseSavedNotes(a.notes);
+          if (parsed?.key && parsed.key === key) return true;
+        } catch {}
+        return false;
+      });
+
+      // Local-only toggle for unsaved account
+      if (!saved || !saved.id) {
+        setSelectedActiveAccount((s) => !s);
+        setNotesOwner((o) => ({ ...o, key }));
+        return;
+      }
+
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], activeAccount: parsed?.activeAccount ?? false };
+        notesObj.activeAccount = !!notesObj.activeAccount ? false : true;
+
+        const res = await fetch(`/api/accounts?id=${saved.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error("Could not update active account flag");
+
+        await refreshSavedAccounts();
+
+        setSelectedActiveAccount(notesObj.activeAccount || false);
+        setNotesOwner({ id: saved.id, key: parsed.key || null });
+      } catch (err) {
+        setError(err?.message || "Could not toggle Active Account.");
+      }
+    };
+
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
       {/* Header */}
@@ -1587,6 +1687,7 @@ export default function ProspectingApp() {
                 <SavedAccountsHeader
                 searchTerm={savedSearchTerm}
                 onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
+                isAddOpen={manualAddOpen}
                 onAdd={() => {
                   setManualAddOpen((s) => !s);
                   setManualSelected(null);
@@ -1834,7 +1935,7 @@ export default function ProspectingApp() {
                           address,
                           lat,
                           lng,
-                          notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked })
+                          notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, activeAccount: selectedActiveAccount, venueType: venueType, venueTypeLocked: venueTypeLocked })
                         };
                         try {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -2000,20 +2101,56 @@ export default function ProspectingApp() {
                       </div>
                     );
                   })}
+                  <div
+                    className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
+                    onClick={() => setVisibleActiveAccounts(v => !v)}
+                  >
+                    <div style={{
+                      width: 14,
+                      height: 14,
+                      background: visibleActiveAccounts ? '#10b981' : '#334155',
+                      borderRadius: 6,
+                      border: '2px solid #fff',
+                      opacity: visibleActiveAccounts ? 1 : 0.4
+                    }} />
+                    <div className="text-[11px] font-bold" style={{ opacity: visibleActiveAccounts ? 1 : 0.5 }}>Active Account</div>
+                  </div>
+
+                  {/* Buttons placed directly under the GPV legend (stacked) */}
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button
+                      onClick={handleMyLocation}
+                      title="My location"
+                      className="w-full px-3 py-1.5 rounded-md border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black"
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <MapPin size={14} className="text-indigo-300" />
+                      <span>My Location</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowActiveOnly(s => {
+                          const next = !s;
+                          if (next) setVisibleActiveAccounts(true);
+                          return next;
+                        });
+                      }}
+                      title="Show active accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showActiveOnly ? 'bg-amber-500 text-[#081113] border-amber-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span className="font-black">$</span>
+                      <span>Active Only</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
               <div className="flex-1 bg-[#020617] relative z-10">
                 <div ref={mapRef} className="absolute inset-0" />
 
-                <button
-                  onClick={handleMyLocation}
-                  title="My location"
-                  className="absolute bottom-12 right-16 z-[9999] bg-slate-800/80 hover:bg-slate-700 p-2.5 rounded-full border border-slate-700 text-slate-200 shadow-lg flex items-center justify-center transition-colors"
-                  style={{ backdropFilter: 'blur(4px)', pointerEvents: 'auto' }}
-                >
-                  <MapPin size={16} className="text-indigo-300" />
-                </button>
+                {/* Legend buttons moved into the GPV legend above */}
               </div>
             </div>
           ) : selectedEstablishment ? (
@@ -2208,6 +2345,8 @@ export default function ProspectingApp() {
                 selectedGpvTier={selectedGpvTier}
                 selectedActiveOpp={selectedActiveOpp}
                 onToggleActiveOpp={toggleActiveOpp}
+                selectedActiveAccount={selectedActiveAccount}
+                onToggleActiveAccount={toggleActiveAccount}
               />
 
               {/* Notes (only for saved accounts) */}
