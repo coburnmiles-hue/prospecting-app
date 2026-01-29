@@ -45,13 +45,22 @@ export default function PersonalMetrics({ data, onActivityClick }) {
             const notes = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
             if (notes?.notes && Array.isArray(notes.notes)) {
               notes.notes.forEach(note => {
-                const noteDate = new Date(note.created_at).toISOString().split('T')[0];
-                if (noteDate === targetDate) {
-                  activitiesForDate.push({
-                    ...note,
-                    account_name: account.name,
-                    account_id: account.id
-                  });
+                try {
+                  // Convert note.created_at to CST date (YYYY-MM-DD) to match targetDate
+                  const d = new Date(note.created_at);
+                  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+                  const cstOffset = -6 * 60; // minutes
+                  const cst = new Date(utc + (cstOffset * 60000));
+                  const noteDate = formatDateCST(cst);
+                  if (noteDate === targetDate) {
+                    activitiesForDate.push({
+                      ...note,
+                      account_name: account.name,
+                      account_id: account.id
+                    });
+                  }
+                } catch (e) {
+                  // skip invalid note date
                 }
               });
             }
@@ -76,6 +85,9 @@ export default function PersonalMetrics({ data, onActivityClick }) {
 
   // Check if selected date is today (CST)
   const isToday = formatDateCST(selectedDate) === formatDateCST(getTodayCST());
+
+  // Count walk-ins for the selected date
+  const walkInsCount = activities.filter(a => String(a.activity_type || '').toLowerCase() === 'walk-in').length;
 
   const goToPreviousDay = () => {
     const newDate = new Date(selectedDate);
@@ -107,6 +119,11 @@ export default function PersonalMetrics({ data, onActivityClick }) {
             <div className="px-3 py-1 bg-indigo-900/30 rounded-full border border-indigo-700/50 text-xs font-black text-indigo-300">
               {activities.length} {activities.length === 1 ? 'Activity' : 'Activities'}
             </div>
+            {isToday && (
+              <div className="px-3 py-1 bg-emerald-900/30 rounded-full border border-emerald-700/50 text-xs font-black text-emerald-300">
+                {walkInsCount} {walkInsCount === 1 ? 'Walk-In' : 'Walk-Ins'}
+              </div>
+            )}
           </div>
         </div>
 

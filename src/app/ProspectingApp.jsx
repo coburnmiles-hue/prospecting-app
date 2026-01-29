@@ -30,6 +30,17 @@ import {
   TrendingUp,
 } from "lucide-react";
 
+// Recharts components used for charts
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+} from "recharts";
+
 // Components
 import TabButton from "../components/buttons/TabButton";
 import SaveButton from "../components/buttons/SaveButton";
@@ -56,29 +67,25 @@ import {
 } from "../utils/formatters";
 import { VENUE_TYPES, GPV_TIERS, BASE_URL, DATE_FIELD, TOTAL_FIELD, TEXAS_CENTER } from "../utils/constants";
 
-// Environment keys (exposed to client must be NEXT_PUBLIC_*)
-const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || null;
-
 // Custom Hooks
 import { useSavedAccounts, useMetricsData } from "../hooks/useData";
 import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
 import { useRoutePlanning } from "../hooks/useRoutePlanning";
 
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
+
+// -------------------- Component --------------------
 export default function ProspectingApp() {
+  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
+  const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
+
+  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics
+  const [savedSubView, setSavedSubView] = useState("list"); // list | map
+
   // Custom hooks for data fetching
   const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
   const { metricsData, metricsLoading } = useMetricsData();
-
+  
   // Search hook
   const {
     searchTerm,
@@ -104,7 +111,8 @@ export default function ProspectingApp() {
   } = useTopLeaders();
 
   // Combine loading and error states for backward compatibility
-  const loading = searchLoading || topLoading;
+  const [localLoading, setLoading] = useState(false);
+  const loading = searchLoading || topLoading || localLoading;
   const error = searchError || topError;
   const setError = (err) => {
     setSearchError(err);
@@ -115,9 +123,6 @@ export default function ProspectingApp() {
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
 
   const [venueType, setVenueType] = useState("casual_dining");
-
-  // Detail view loading (used when loading account history/details)
-  const [detailLoading, setDetailLoading] = useState(false);
 
   // AI
   const [aiLoading, setAiLoading] = useState(false);
@@ -147,47 +152,10 @@ export default function ProspectingApp() {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef({});
-  const mapInitializedRef = useRef(false); // prevents repeated fitBounds that cause zoom jumps
+  const userLocationLayerRef = useRef(null);
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
-
-  // Saved view inside the Saved tab: 'list' | 'map' | 'info'
-  const [savedSubView, setSavedSubView] = useState("list");
-  // Primary view mode: 'search' | 'top' | 'saved' | 'metrics'
-  const [viewMode, setViewMode] = useState("search");
-
-  // Diagnostic: surface unhandled promise rejections / errors (often from browser extensions)
-  useEffect(() => {
-    const onUnhandled = (e) => {
-      try {
-        console.warn("Global unhandledrejection:", e);
-        const reason = e && e.reason;
-        if (reason) {
-          console.warn("Unhandled reason message:", reason.message || reason);
-          if (reason.stack) console.warn("Unhandled reason stack:", reason.stack);
-          const stackStr = String(reason.stack || "");
-          const extMatch = stackStr.match(/chrome-extension:\/\/([a-p0-9]+)\//i);
-          if (extMatch) console.warn("Likely extension id:", extMatch[1]);
-        }
-      } catch (err) {
-        console.error("Error in unhandledrejection handler", err);
-      }
-    };
-
-    const onError = (ev) => {
-      try {
-        console.warn("Global error event:", ev);
-      } catch (err) {}
-    };
-
-    window.addEventListener("unhandledrejection", onUnhandled);
-    window.addEventListener("error", onError);
-    return () => {
-      window.removeEventListener("unhandledrejection", onUnhandled);
-      window.removeEventListener("error", onError);
-    };
-  }, []);
 
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
@@ -201,14 +169,10 @@ export default function ProspectingApp() {
   const [manualCityFilter, setManualCityFilter] = useState("");
   const [manualResults, setManualResults] = useState([]);
   const [manualSelected, setManualSelected] = useState(null);
-  const [manualGpvTier, setManualGpvTier] = useState(null);
   const [manualSearching, setManualSearching] = useState(false);
+  const [manualGpvTier, setManualGpvTier] = useState(null);
+  const [manualSaving, setManualSaving] = useState(false);
   const manualSearchTimeout = useRef(null);
-  useEffect(() => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('DEBUG: selectedEstablishment ->', selectedEstablishment ? { id: selectedEstablishment.info?.id, name: selectedEstablishment.info?.location_name } : null);
-    }
-  }, [selectedEstablishment]);
 
   // Wrapper for handleSearch to clear state
   const wrappedHandleSearch = async (e) => {
@@ -242,7 +206,7 @@ export default function ProspectingApp() {
 
     if (!est?.taxpayer_number || !est?.location_number) return;
 
-    setDetailLoading(true);
+    setLoading(true);
     try {
       const where = `taxpayer_number = '${est.taxpayer_number}' AND location_number = '${est.location_number}'`;
       const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
@@ -274,7 +238,7 @@ export default function ProspectingApp() {
     } catch (err) {
       setError(err?.message || "Could not load account details.");
     } finally {
-      setDetailLoading(false);
+      setLoading(false);
     }
   };
 
@@ -343,21 +307,10 @@ export default function ProspectingApp() {
     }
 
     try {
-
-      // If AI is currently running, ask user to wait
+      // Require AI intel to be loaded before saving a new account
       if (aiLoading) {
         setError("Please wait for AI Intelligence to finish loading before saving.");
         return;
-      }
-
-      // If we don't yet have an AI response for this selection, fetch it now so it is saved with the account
-      if (!aiResponse || !aiResponse.trim()) {
-        try {
-          await fetchAiForInfo(info, { updateState: true });
-        } catch (e) {
-          // ignore - we'll still save without AI if it fails
-          console.error('AI fetch before save failed', e);
-        }
       }
 
       // Require GPV tier to be selected before saving a new account
@@ -726,35 +679,16 @@ export default function ProspectingApp() {
   };
 
   // ---------- AI ----------
-  // Fetch AI text for a given info object (returns the text). Also sets `aiResponse`/`aiLoading` when used with current selection.
-  const fetchAiForInfo = async (info, { updateState = true } = {}) => {
-    if (!info) return "";
-
-    // If this is a saved account with existing AI response, return it
-    if (info.id) {
-      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => a.id === info.id);
-      if (saved) {
-        try {
-          const parsed = parseSavedNotes(saved.notes);
-          if (parsed?.aiResponse) {
-            if (updateState) {
-              skipAiLookupRef.current = true;
-              setAiResponse(parsed.aiResponse);
-              setAiLoading(false);
-            }
-            return parsed.aiResponse;
-          }
-        } catch {}
-      }
-    }
-
+  // Fetch AI text for a given info object. If updateState is true, set `aiLoading`/`aiResponse`.
+  const fetchAiForInfo = async (info = {}, options = { updateState: false }) => {
+    const { updateState } = options || {};
     if (updateState) {
       setAiLoading(true);
       setAiResponse("");
     }
 
     try {
-      const businessName = info.location_name || info.name || info.taxpayer_name || "(unknown)";
+      const businessName = info.location_name || info.name || "(unknown)";
       const city = info.location_city || info.city || "Texas";
       const taxpayer = info.taxpayer_name || businessName;
 
@@ -782,9 +716,9 @@ export default function ProspectingApp() {
       }
 
       const text = (bodyJson && (bodyJson.text || (bodyJson.raw && bodyJson.raw?.candidates?.[0]?.content?.parts?.[0]?.text))) || "";
-      const trimmed = String(text || "No response received.").trim();
-      if (updateState) setAiResponse(trimmed);
-      return trimmed;
+      const finalText = String(text || "No response received.").trim();
+      if (updateState) setAiResponse(finalText);
+      return finalText;
     } catch (err) {
       const msg = `Error: ${err?.message || "AI request failed"}`;
       if (updateState) setAiResponse(msg);
@@ -794,10 +728,28 @@ export default function ProspectingApp() {
     }
   };
 
+  // Backwards-compatible wrapper: trigger AI lookup for selectedEstablishment using fetchAiForInfo
   const performIntelligenceLookup = async () => {
     if (!selectedEstablishment || !selectedEstablishment.info) return;
+
+    // Skip if AI response already available
     if (aiResponse && aiResponse.trim()) return;
-    await fetchAiForInfo(selectedEstablishment.info, { updateState: true });
+
+    const info = selectedEstablishment.info;
+    if (info.id) {
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => a.id === info.id);
+      if (saved) {
+        try {
+          const parsed = parseSavedNotes(saved.notes);
+          if (parsed?.aiResponse) {
+            setAiResponse(parsed.aiResponse);
+            return;
+          }
+        } catch {}
+      }
+    }
+
+    await fetchAiForInfo(info, { updateState: true });
   };
 
   // Auto-trigger AI lookup when an account is selected (but only if no AI response exists)
@@ -840,29 +792,85 @@ export default function ProspectingApp() {
         attributionControl: false,
       }).setView(TEXAS_CENTER, 6);
 
+      let baseLayer = null;
       if (MAPBOX_KEY) {
-        L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+        baseLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
           tileSize: 512,
           zoomOffset: -1,
           maxZoom: 22,
           attribution: '© Mapbox © OpenStreetMap',
-        }).addTo(mapInstance.current);
+        });
       } else {
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        baseLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
           maxZoom: 19,
-        }).addTo(mapInstance.current);
+        });
+      }
+
+      baseLayer.addTo(mapInstance.current);
+      // Debug tile events and fallback to OSM if tiles don't load
+      try {
+        let tileLoaded = false;
+        baseLayer.on && baseLayer.on('tileerror', (err) => console.warn('Leaflet tileerror', err));
+        baseLayer.on && baseLayer.on('tileload', (e) => {
+          tileLoaded = true;
+          console.log('Leaflet tileload', e);
+        });
+
+        // If no tiles load within 2s, add an OSM fallback layer for debugging
+        setTimeout(() => {
+          try {
+            const container = mapInstance.current.getContainer && mapInstance.current.getContainer();
+            console.log('Map container size (w,h):', mapInstance.current.getSize(), 'dom clientHeight:', container?.clientHeight);
+          } catch (e) {}
+
+          if (!tileLoaded) {
+            try {
+              console.warn('No tiles loaded from primary provider; adding OSM fallback layer for debugging');
+              const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
+              osm.addTo(mapInstance.current);
+              osm.on && osm.on('tileload', (e) => console.log('OSM tileload', e));
+              osm.on && osm.on('tileerror', (e) => console.warn('OSM tileerror', e));
+            } catch (e) {
+              console.error('Failed to add OSM fallback', e);
+            }
+          }
+        }, 2000);
+      } catch (e) {
+        // ignore
       }
 
       L.control.zoom({ position: "bottomright" }).addTo(mapInstance.current);
 
-      // Update markers initially and whenever zoom changes (to rescale icons)
+      // Expose map for console debugging and force a resize/invalidate to fix hidden container issues
+      try {
+        window._map = mapInstance.current;
+        console.log('Leaflet loaded, map exposed at window._map');
+        mapInstance.current.whenReady(() => {
+          try {
+            console.log('Map whenReady, size:', mapInstance.current.getSize());
+            const container = mapInstance.current.getContainer();
+            // If container has zero height, set a reasonable minHeight so tiles render
+            if (container && container.clientHeight === 0) {
+              console.warn('Map container has zero height; applying fallback minHeight');
+              container.style.minHeight = '420px';
+            }
+          } catch (e) {
+            // ignore
+          }
+          setTimeout(() => {
+            try {
+              mapInstance.current.invalidateSize();
+              console.log('Called invalidateSize() on map');
+            } catch (e) {
+              console.error('invalidateSize failed', e);
+            }
+          }, 500);
+        });
+      } catch (e) {
+        // ignore
+      }
+
       updateMarkers();
-      mapInstance.current.on('zoomend', () => {
-        // Rebuild markers so icon sizes update with zoom.
-        updateMarkers();
-      });
-      // Do not mark initialized here; let updateMarkers perform the initial fitBounds
-      // so we can avoid prematurely locking map behavior.
     };
 
     document.head.appendChild(script);
@@ -872,10 +880,6 @@ export default function ProspectingApp() {
         if (mapInstance.current) {
           mapInstance.current.remove();
           mapInstance.current = null;
-          // Clear any existing markers when the map instance is torn down to avoid
-          // holding references to removed Leaflet objects which can cause reuse issues
-          markersRef.current = {};
-          mapInitializedRef.current = false;
         }
       } catch {
         // ignore
@@ -885,22 +889,15 @@ export default function ProspectingApp() {
   }, [savedSubView]);
 
   const updateMarkers = () => {
-    try {
-      if (!mapInstance.current || !window.L) return;
-      const L = window.L;
+    if (!mapInstance.current || !window.L) return;
+    const L = window.L;
 
-      console.debug("updateMarkers: savedAccounts length", Array.isArray(savedAccounts) ? savedAccounts.length : 0, "visibleTiers", visibleTiers.size);
+    Object.values(markersRef.current).forEach((m) => m.remove());
+    markersRef.current = {};
 
     const bounds = L.latLngBounds([]);
 
-    const currentRows = (Array.isArray(savedAccounts) ? savedAccounts : []);
-    // If the saved list is temporarily empty but markers already exist, keep them until
-    // a non-empty list arrives to avoid flicker/removal caused by transient refreshes.
-    if (currentRows.length === 0 && Object.keys(markersRef.current || {}).length > 0) {
-      console.debug("updateMarkers: savedAccounts empty but markers exist; preserving existing markers until next update.");
-      return;
-    }
-    const pins = currentRows.map((row) => {
+    const pins = (Array.isArray(savedAccounts) ? savedAccounts : []).map((row) => {
       // Row has lat/lng saved, but fall back to pseudo if missing. Prefer the stored KEY (taxpayer-location)
       const lat = Number(row.lat);
       const lng = Number(row.lng);
@@ -911,104 +908,31 @@ export default function ProspectingApp() {
       return { ...row, lat: pseudo.lat, lng: pseudo.lng };
     });
 
-    const zoomLevel = Math.max(1, Math.round(mapInstance.current.getZoom() || 12));
-    // Log a few sample rows for debugging
-    if (currentRows.length > 0) {
-      console.debug("updateMarkers samples:", currentRows.slice(0,3).map(r => ({id: r.id, name: r.name, lat: r.lat, lng: r.lng}))); 
-    }
-
-    // Track keys that should remain after this update
-    const remainingKeys = new Set();
-
     pins.forEach((row) => {
-      if (!Number.isFinite(Number(row.lat)) || !Number.isFinite(Number(row.lng))) {
-        console.debug("Skipping marker with invalid coords", row.id, row.name, row.lat, row.lng);
-        return;
-      }
       // Determine pin color by GPV tier if present
       const parsed = parseSavedNotes(row.notes);
       const tier = parsed?.gpvTier || null;
       
       // Skip this pin if its tier is not visible
-      if (tier && !visibleTiers.has(tier)) {
-        console.debug("Skipping marker due to hidden tier", row.id, row.name, tier);
-        return;
-      }
+      if (tier && !visibleTiers.has(tier)) return;
       
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
-      // Scale icon size so pins get smaller as zoom increases.
-      const base = 36; // px at reference zoom
-      const inv = 12 / Math.max(1, zoomLevel);
-      const scale = Math.max(0.4, Math.min(1.2, inv));
-      const size = Math.max(10, Math.min(base, Math.round(base * scale)));
-
-      // Simple escape for labels
-      const esc = (s) => String(s || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-
-      const labelHtml = esc(row.name || "");
-      // Only show labels when zoom is sufficiently close to avoid clutter
-      const LABEL_ZOOM_THRESHOLD = 10;
-      const showLabel = zoomLevel >= LABEL_ZOOM_THRESHOLD;
 
       const markerIcon = L.divIcon({
         className: "custom-div-icon",
-        html: `
-          <div style="display:flex;flex-direction:column;align-items:center;pointer-events:auto;">
-            <div style="width:${size}px;height:${size}px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:${halo}0 10px 20px rgba(0,0,0,.35);">
-              <svg width="${Math.max(8, Math.round(size * 0.35))}" height="${Math.max(8, Math.round(size * 0.35))}" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                <circle cx="12" cy="10" r="3"></circle>
-              </svg>
-            </div>
-            <div style="margin-top:4px;color:#fff;font-size:11px;font-weight:700;text-align:center;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;display:${showLabel ? 'block' : 'none'};">
-              ${labelHtml}
-            </div>
-          </div>
-        `,
-        iconSize: [size, size + 18],
-        iconAnchor: [Math.round(size / 2), size],
+        html: `<div style="width:32px;height:32px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:${halo}0 10px 20px rgba(0,0,0,.35);">
+                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                   <circle cx="12" cy="10" r="3"></circle>
+                 </svg>
+               </div>`,
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
       });
 
-      const key = row.id?.toString() || `${row.lat},${row.lng}`;
-
-      // Reuse existing marker if present to avoid removing popups on re-render
-      let marker = markersRef.current[key];
-      if (marker) {
-        try {
-          marker.setIcon(markerIcon);
-          marker.setLatLng([row.lat, row.lng]);
-        } catch (e) { console.error('Failed to update existing marker', e); }
-      } else {
-        console.debug('Creating marker', key, row.name, row.lat, row.lng);
-        marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
-
-        // Attach click handler for new markers
-        marker.on('click', () => {
-          try {
-            const parsed = parseSavedNotes(row.notes);
-            const keyParts = parsed?.key ? parsed.key.split('-') : [];
-            setSelectedEstablishment({
-              info: {
-                id: row.id,
-                location_name: row.name || row.location_name,
-                location_address: row.address || row.location_address,
-                taxpayer_number: keyParts[0] || undefined,
-                location_number: keyParts[1] || undefined,
-                lat: row.lat,
-                lng: row.lng,
-              },
-              history: Array.isArray(parsed?.history) ? parsed.history : [],
-            });
-            setCoordLat(row.lat || 0);
-            setCoordLng(row.lng || 0);
-            setCoordEditorOpen(true);
-            try { marker.openPopup(); } catch (e) { console.error('openPopup failed', e); }
-              setTimeout(() => { try { marker.openPopup(); } catch (e) { console.error('openPopup retry failed', e); } }, 120);
-          } catch (e) {}
-        });
-      }
+      const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
 
       const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.address || "")}`;
 
@@ -1047,6 +971,8 @@ export default function ProspectingApp() {
       `);
 
       // When a marker is clicked, surface the account and open the coord editor
+
+  
       marker.on('click', () => {
         try {
           const parsed = parseSavedNotes(row.notes);
@@ -1066,44 +992,18 @@ export default function ProspectingApp() {
           setCoordLat(row.lat || 0);
           setCoordLng(row.lng || 0);
           setCoordEditorOpen(true);
-
-          // Ensure popup opens reliably even if React re-renders the component.
-          try { marker.openPopup(); } catch (e) {}
-          setTimeout(() => {
-            try { marker.openPopup(); } catch (e) {}
-          }, 120);
         } catch (e) {
           // ignore
         }
       });
 
-      remainingKeys.add(key);
+      const key = row.id?.toString() || `${row.lat},${row.lng}`;
       markersRef.current[key] = marker;
       bounds.extend([row.lat, row.lng]);
     });
 
-    // Remove any markers that were not present in this update
-    Object.keys(markersRef.current).forEach((k) => {
-      if (!remainingKeys.has(k)) {
-        try {
-          markersRef.current[k].remove();
-        } catch (e) {}
-        delete markersRef.current[k];
-      }
-    });
-
     if (pins.length > 0) {
-      if (!mapInitializedRef.current) {
-        try {
-          mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
-        } catch (e) {
-          // ignore fit errors
-        }
-        mapInitializedRef.current = true;
-      }
-    }
-    } catch (err) {
-      console.error("updateMarkers error:", err);
+      mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
     }
   };
 
@@ -1111,6 +1011,49 @@ export default function ProspectingApp() {
     if (savedSubView === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers]);
+
+  // Fly map to user's current location (if available)
+  const handleMyLocation = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      alert('Geolocation not supported in this browser');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        try {
+          if (mapInstance.current) {
+            mapInstance.current.flyTo([latitude, longitude], 15, { duration: 1.0 });
+
+            // Add a blue pulsing dot at the user's location (marker only)
+            try {
+              const L = window.L;
+              // remove previous marker
+              if (userLocationLayerRef.current) {
+                try { userLocationLayerRef.current.remove(); } catch {}
+                userLocationLayerRef.current = null;
+              }
+
+              const dotHtml = `<div class="user-location-dot"><div class="user-location-pulse"></div></div>`;
+              const icon = L.divIcon({ className: 'user-location-icon', html: dotHtml, iconSize: [24, 24], iconAnchor: [12, 12] });
+              const marker = L.marker([latitude, longitude], { icon, interactive: false }).addTo(mapInstance.current);
+              userLocationLayerRef.current = marker;
+            } catch (e) {
+              console.error('Failed to add user location marker', e);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to move map to current location', e);
+        }
+      },
+      (err) => {
+        console.error('Geolocation error', err);
+        alert('Unable to determine your location.');
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
   // Note: popup-based unsave has been removed; saving/unsaving is handled
   // exclusively via the Save button in the account info UI which calls
@@ -1126,8 +1069,6 @@ export default function ProspectingApp() {
     const estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
     return { avgAlc, estFood, total: avgAlc + estFood, cfg };
   }, [selectedEstablishment, venueType]);
-
-  
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -1561,18 +1502,14 @@ export default function ProspectingApp() {
         {viewMode !== "metrics" && (
           <aside className="lg:col-span-4 space-y-6">
             {viewMode === "saved" ? (
-              <SavedAccountsHeader
+                <SavedAccountsHeader
                 searchTerm={savedSearchTerm}
                 onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
                 onAdd={() => {
-                  console.debug('SavedAccountsHeader onAdd clicked - opening manual add');
-                  // Ensure we're in the saved view and then toggle the manual add panel
-                  setViewMode('saved');
-                  setSavedSubView('list');
                   setManualAddOpen((s) => !s);
                   setManualSelected(null);
-                  setManualGpvTier(null);
                   setManualQuery("");
+                  setManualGpvTier(null);
                 }}
                 onPlanRoute={() => {
                   setRoutePlanMode((m) => !m);
@@ -1721,7 +1658,6 @@ export default function ProspectingApp() {
                       setManualCityFilter('');
                       setManualResults([]);
                       setManualSelected(null);
-                      setManualGpvTier(null);
                     }}
                     className="bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-[10px] font-bold uppercase"
                   >
@@ -1781,10 +1717,10 @@ export default function ProspectingApp() {
                         <button
                           key={t.id}
                           onClick={() => setManualGpvTier(t.id)}
-                          className={`px-3 py-1 rounded-xl text-[11px] font-black uppercase flex items-center gap-2 border ${manualGpvTier === t.id ? 'border-emerald-500 bg-emerald-600/10' : 'border-slate-700'} `}
+                          className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all border ${manualGpvTier === t.id ? 'opacity-100' : 'opacity-40'}`}
+                          style={{ background: manualGpvTier === t.id ? t.color : 'transparent', color: manualGpvTier === t.id ? '#fff' : t.color, borderColor: t.color }}
                         >
-                          <span style={{width:12,height:12,background:t.color,borderRadius:6,display:'inline-block'}}></span>
-                          <span>{t.label}</span>
+                          {t.label}
                         </button>
                       ))}
                     </div>
@@ -1793,39 +1729,11 @@ export default function ProspectingApp() {
                   <div className="flex gap-2">
                     <button
                       onClick={async () => {
-                        // Prepare payload and save (mirror validations from toggleSaveAccount)
+                        setManualSaving(true);
+                        // Prepare payload and save
                         const info = manualSelected || {};
                         const name = (info.name || '').trim() || 'Manual Account';
                         const address = (info.address || '').trim();
-
-                        // Require AI to not already be running
-                        if (aiLoading) {
-                          setError('Please wait for AI Intelligence to finish loading before saving.');
-                          return;
-                        }
-
-                        // Require GPV tier selection
-                        const chosenTier = manualGpvTier || selectedGpvTier;
-                        if (!chosenTier) {
-                          setError('Please select a GPV Tier before saving this account.');
-                          return;
-                        }
-
-                        // Require venue type
-                        if (!venueType) {
-                          setError('Please select an Account Type before saving this account.');
-                          return;
-                        }
-
-                        // Run AI for this manual info so the response is saved with the account
-                        let aiText = "";
-                        try {
-                          aiText = await fetchAiForInfo({ location_name: name, location_city: manualCityFilter || '', taxpayer_name: name }, { updateState: true });
-                          console.debug('Manual add: fetched aiText', aiText);
-                          console.debug('Manual add: current aiResponse state', aiResponse);
-                        } catch (e) {
-                          console.error('AI fetch for manual save failed', e);
-                        }
 
                         // Use coordinates from Google Places if available, otherwise geocode
                         let lat = info.lat;
@@ -1838,48 +1746,76 @@ export default function ProspectingApp() {
                           lng = pseudo.lng;
                         }
 
+                        const chosenTier = manualGpvTier || selectedGpvTier;
                         const payload = {
                           name,
                           address,
                           lat,
                           lng,
-                          notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked, aiResponse: aiText || aiResponse || "" })
+                          notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, venueType: venueType, venueTypeLocked: venueTypeLocked })
                         };
-                        console.debug('Manual add payload notes preview', payload.notes);
                         try {
                           const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                           if (!res.ok) throw new Error('Save failed');
                           const created = await res.json();
                           await refreshSavedAccounts();
+
+                          // open the newly created account in the detail panel so SaveButton shows as saved
+                          setSelectedEstablishment({
+                            info: {
+                              id: created.id,
+                              location_name: created.name,
+                              location_address: created.address,
+                              lat: created.lat,
+                              lng: created.lng,
+                              notes: created.notes,
+                            },
+                            history: [],
+                          });
+
+                          // Run AI lookup, show loading, and persist the AI response on the saved account
+                          try {
+                            const aiText = await fetchAiForInfo({ location_name: name, location_city: manualCityFilter || '', taxpayer_name: name }, { updateState: true });
+                            try {
+                              // Merge into existing notes JSON
+                              const parsed = (() => {
+                                try { return typeof created.notes === 'string' ? JSON.parse(created.notes) : created.notes || {}; } catch { return {}; }
+                              })();
+                              parsed.aiResponse = aiText || parsed.aiResponse || "";
+                              // Persist AI response to the account row
+                              await fetch(`/api/accounts?id=${created.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes: JSON.stringify(parsed) }) });
+                              await refreshSavedAccounts();
+                              setSelectedGpvTier(chosenTier || null);
+                            } catch (e) {
+                              console.error('Failed to persist AI response on saved account', e);
+                            }
+                          } catch (e) {
+                            console.error('AI lookup for new account failed', e);
+                          }
+
                           setManualAddOpen(false);
                           setManualQuery('');
                           setManualResults([]);
                           setManualSelected(null);
-                          setManualGpvTier(null);
-                          // restore selected gpv tier for UI so pin color matches immediately
-                          setSelectedGpvTier(chosenTier);
-                          // open the newly created account in the detail panel with proper ID so SaveButton shows as saved
-                          setSelectedEstablishment({ 
-                            info: { 
-                              id: created.id, 
-                              location_name: created.name, 
-                              location_address: created.address, 
-                              lat: created.lat, 
-                              lng: created.lng,
-                              // Include the notes field so isSaved can match it
-                              notes: created.notes
-                            }, 
-                            history: [] 
-                          });
                         } catch (err) {
                           setError(err?.message || 'Could not save account.');
+                        } finally {
+                          setManualSaving(false);
                         }
                       }}
-                      className="bg-indigo-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase"
+                      className={`bg-indigo-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase ${manualSaving ? 'opacity-60' : ''}`}
+                      disabled={manualSaving}
                     >
-                      Save Account
+                      {manualSaving ? (
+                        <>
+                          <Loader2 size={14} className="inline-block animate-spin mr-2" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Account'
+                      )}
                     </button>
-                    <button onClick={() => { setManualAddOpen(false); setManualGpvTier(null); }} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
+                    <button onClick={() => setManualAddOpen(false)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
                   </div>
                 </div>
               </div>
@@ -1934,7 +1870,7 @@ export default function ProspectingApp() {
               />
             )
           ) : savedSubView === "map" ? (
-            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[600px] flex flex-col">
+            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] flex flex-col">
               <div className="p-6 border-b border-slate-700 bg-slate-900/80 flex items-center justify-between z-[1000] backdrop-blur-md">
                 <div>
                   <h2 className="text-xs font-black text-white uppercase italic tracking-[0.2em] flex items-center gap-2">
@@ -1949,7 +1885,7 @@ export default function ProspectingApp() {
                 </div>
               </div>
 
-              <div className="absolute top-20 right-6 z-30 bg-slate-900/80 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
+              <div className="absolute top-20 right-6 z-50 bg-slate-900/80 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
                 <div className="font-black uppercase text-[10px] text-indigo-300 mb-2">GPV Legend</div>
                 <div className="flex flex-col gap-2">
                   {GPV_TIERS.map((t) => {
@@ -1985,7 +1921,18 @@ export default function ProspectingApp() {
                 </div>
               </div>
 
-              <div ref={mapRef} className="flex-1 bg-[#020617] relative z-10" />
+              <div className="flex-1 bg-[#020617] relative z-10">
+                <div ref={mapRef} className="absolute inset-0" />
+
+                <button
+                  onClick={handleMyLocation}
+                  title="My location"
+                  className="absolute bottom-10 right-8 z-[9999] bg-slate-800/80 hover:bg-slate-700 p-2.5 rounded-full border border-slate-700 text-slate-200 shadow-lg flex items-center justify-center transition-colors"
+                  style={{ backdropFilter: 'blur(4px)', pointerEvents: 'auto' }}
+                >
+                  <MapPin size={16} className="text-indigo-300" />
+                </button>
+              </div>
             </div>
           ) : selectedEstablishment ? (
             <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
@@ -2044,9 +1991,7 @@ export default function ProspectingApp() {
                       disabled={aiLoading && !isSaved(selectedEstablishment.info)}
                     />
 
-                    <div className="flex flex-col">
-                      <ForecastCard total={stats?.total || 0} />
-                    </div>
+                    <ForecastCard total={stats?.total || 0} />
                   </div>
                 </div>
 
@@ -2211,8 +2156,6 @@ export default function ProspectingApp() {
       </main>
 
       {/* Small CSS helpers */}
-      
-
       <style>{`
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }

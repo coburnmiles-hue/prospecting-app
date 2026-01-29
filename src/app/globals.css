@@ -42,6 +42,12 @@ body {
   background: #020617 !important;
   border: none;
 }
+
+/* Ensure Leaflet fills its container */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+}
 .leaflet-popup-content-wrapper {
   background: #1e293b;
   color: #fff;
@@ -61,3 +67,8 @@ body {
   background: transparent;
   border: none;
 }
+
+/* User location pulsing dot */
+.user-location-dot{position:relative;width:14px;height:14px;border-radius:50%;background:#3b82f6;border:2px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,0.12)}
+.user-location-pulse{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:rgba(59,130,246,0.35);animation:ul-pulse 1.5s infinite}
+@keyframes ul-pulse{0%{transform:translate(-50%,-50%) scale(.6);opacity:1}100%{transform:translate(-50%,-50%) scale(2.2);opacity:0}}

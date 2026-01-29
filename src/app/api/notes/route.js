@@ -42,7 +42,7 @@ export async function POST(req) {
     const body = await req.json();
     const accountId = Number(body?.accountId);
     const text = (body?.text || "").toString().trim();
-    const activity_type = body?.activity_type || "update";
+    const activity_type = body?.activity_type || "walk-in";
 
     if (!Number.isFinite(accountId) || !text) {
       return Response.json({ error: "accountId and text are required" }, { status: 400 });
@@ -51,13 +51,17 @@ export async function POST(req) {
     const row = await readNotesRow(sql, accountId);
     if (!row) return Response.json({ error: "Account not found" }, { status: 404 });
 
-    const now = new Date().toISOString();
-    const newNote = { 
-      id: Date.now() + Math.random(), 
-      text, 
+    const now = new Date();
+    const nowIso = now.toISOString();
+    // compute local date (YYYY-MM-DD) by adjusting for timezone offset
+    const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0,10);
+    const newNote = {
+      id: Date.now() + Math.random(),
+      text,
       activity_type,
-      created_at: now,
-      account_id: accountId
+      created_at: nowIso,
+      created_local_date: localDate,
+      account_id: accountId,
     };
 
     let notesObj = { notes: [] };
