@@ -35,12 +35,21 @@ export default function PersonalMetrics({ data, onActivityClick }) {
     // Fetch activities for selected date
     const fetchActivities = async () => {
       try {
-        const accounts = await fetch('/api/accounts', { cache: 'no-store' }).then(r => r.json());
+        const accounts = await fetch('/api/accounts', { cache: 'no-store' }).then(async (r) => {
+          if (!r.ok) {
+            const txt = await r.text().catch(() => '');
+            throw new Error(`Accounts API error ${r.status}: ${txt}`);
+          }
+          return r.json();
+        });
         const targetDate = formatDateCST(selectedDate);
         
         const activitiesForDate = [];
         
-        accounts.forEach(account => {
+        if (!Array.isArray(accounts)) {
+          console.error('Accounts API returned non-array:', accounts);
+        } else {
+          accounts.forEach(account => {
           try {
             const notes = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
             if (notes?.notes && Array.isArray(notes.notes)) {
@@ -69,11 +78,13 @@ export default function PersonalMetrics({ data, onActivityClick }) {
           }
         });
         
+        }
         // Sort by most recent first
         activitiesForDate.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         setActivities(activitiesForDate);
       } catch (err) {
         console.error('Failed to fetch activities:', err);
+        setActivities([]);
       }
     };
 

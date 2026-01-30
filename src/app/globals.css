@@ -75,3 +75,13 @@ body {
 
 /* Popup Add To Route visual state */
 .route-added{background:#f97316 !important;border-color:#b45309 !important;color:#0b1220 !important;box-shadow:0 6px 14px rgba(249,115,22,0.18);transform:translateY(-1px)}
+
+/* Pin label styling */
+.pin-label {
+  background: transparent !important;
+  color: #ffffff !important;
+  font-weight: 800;
+  font-size: 11px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  padding: 0 4px !important;
+}

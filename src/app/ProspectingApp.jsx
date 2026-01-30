@@ -148,12 +148,15 @@ export default function ProspectingApp() {
   const [calculatedRoute, setCalculatedRoute] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const routePolylineRef = useRef(null);
+  const [routeError, setRouteError] = useState("");
 
   // Map
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef({});
   const userLocationLayerRef = useRef(null);
+  const LABEL_ZOOM_THRESHOLD = 13;
+  const [legendOpen, setLegendOpen] = useState(true);
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
@@ -654,6 +657,22 @@ export default function ProspectingApp() {
         if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
       }
 
+      // Log what we're sending so we can debug origin issues locally
+      console.log('calculateRoute: origin ->', origin, 'waypoints ->', waypoints);
+
+      // If origin equals the first waypoint then geolocation likely failed or was denied
+      try {
+        const usedFallback = origin && waypoints.length > 0 && Number(origin.lat) === Number(waypoints[0].lat) && Number(origin.lng) === Number(waypoints[0].lng);
+        if (usedFallback && typeof navigator !== 'undefined' && navigator.geolocation) {
+          const msg = 'Could not access your location. Allow location access to use your current location as route start.';
+          setRouteError(msg);
+          // also propagate to global search/top error so it appears in SearchForm when visible
+          setError(msg);
+        } else {
+          setRouteError("");
+        }
+      } catch (e) {}
+
       const res = await fetch('/api/route', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -867,6 +886,23 @@ export default function ProspectingApp() {
 
       L.control.zoom({ position: "bottomright" }).addTo(mapInstance.current);
 
+      // Toggle pin label visibility based on zoom level
+      try {
+        mapInstance.current.on && mapInstance.current.on('zoomend', () => {
+          try {
+            const z = mapInstance.current.getZoom();
+            Object.values(markersRef.current || {}).forEach((m) => {
+              try {
+                if (!m) return;
+                if (typeof m.getTooltip === 'function') {
+                  if (z >= LABEL_ZOOM_THRESHOLD) m.openTooltip(); else m.closeTooltip();
+                }
+              } catch (e) {}
+            });
+          } catch (e) {}
+        });
+      } catch (e) {}
+
       // Expose map for console debugging and force a resize/invalidate to fix hidden container issues
       try {
         window._map = mapInstance.current;
@@ -978,6 +1014,21 @@ export default function ProspectingApp() {
 
       const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
 
+      // Bind a small label under the pin; visibility controlled by zoom level
+      try {
+        marker.bindTooltip((row.name || "").toString(), {
+          permanent: true,
+          direction: 'bottom',
+          className: 'pin-label',
+          offset: [0, 10]
+        });
+        // initial visibility
+        try {
+          const z = mapInstance.current.getZoom();
+          if (z >= LABEL_ZOOM_THRESHOLD) marker.openTooltip(); else marker.closeTooltip();
+        } catch (e) {}
+      } catch (e) {}
+
       const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.address || "")}`;
 
       // Prefer a stable identifier: DB id, or the stored KEY token (after KEY:), else fallback to lat,lng
@@ -1026,19 +1077,17 @@ export default function ProspectingApp() {
       // Open popup and surface account detail; attach popup handler for "Add To Route"
       marker.on('click', () => {
         try {
-          // Fly the map to the pin and open the popup so both actions occur together
+          // Center the map on the pin without changing zoom
           try {
             if (mapInstance.current && mapInstance.current.panTo) {
               mapInstance.current.panTo([row.lat, row.lng]);
             } else if (mapInstance.current && mapInstance.current.setView) {
               mapInstance.current.setView([row.lat, row.lng], mapInstance.current.getZoom(), { animate: true });
             }
-          } catch (e) {
-            // ignore
-          }
+          } catch (e) {}
 
-          // Open the popup immediately (flyTo will animate concurrently)
-          marker.openPopup();
+          // Open the popup but do not auto-zoom
+          try { marker.openPopup(); } catch (e) {}
 
           const parsed = parseSavedNotes(row.notes);
           const keyParts = parsed?.key ? parsed.key.split('-') : [];
@@ -1767,6 +1816,11 @@ export default function ProspectingApp() {
                     {routeLoading ? 'Calculating...' : 'Calculate Route'}
                   </button>
                 )}
+                {!!routeError && (
+                  <div className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3">
+                    {routeError}
+                  </div>
+                )}
                 {calculatedRoute && (
                   <div className="mt-3 space-y-2 text-[10px]">
                     <div className="flex justify-between text-emerald-300 font-bold">
@@ -1793,19 +1847,6 @@ export default function ProspectingApp() {
                 )}
               </div>
             )}
-
-            <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
-              {listToRender.map(renderListItem)}
-              {listToRender.length === 0 && (
-                <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
-                  {viewMode === "saved"
-                    ? "No saved accounts yet."
-                    : viewMode === "top"
-                    ? "Run a city or zip ranking to see leaders."
-                    : "Search for a business or address to see results."}
-                </div>
-              )}
-            </div>
 
             {/* Manual Add Panel */}
             {viewMode === 'saved' && manualAddOpen && (
@@ -2033,6 +2074,19 @@ export default function ProspectingApp() {
                 </div>
               </div>
             )}
+
+            <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
+              {listToRender.map(renderListItem)}
+              {listToRender.length === 0 && (
+                <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
+                  {viewMode === "saved"
+                    ? "No saved accounts yet."
+                    : viewMode === "top"
+                    ? "Run a city or zip ranking to see leaders."
+                    : "Search for a business or address to see results."}
+                </div>
+              )}
+            </div>
           </aside>
         )}
 
@@ -2099,8 +2153,13 @@ export default function ProspectingApp() {
               </div>
 
               <div className="absolute top-20 right-6 z-50 bg-slate-900/80 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
-                <div className="font-black uppercase text-[10px] text-indigo-300 mb-2">GPV Legend</div>
-                <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-black uppercase text-[10px] text-indigo-300">GPV Legend</div>
+                  <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
+                    {legendOpen ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <div className={`flex flex-col gap-2 ${legendOpen ? '' : 'hidden'}`}>
                   {GPV_TIERS.map((t) => {
                     const isVisible = visibleTiers.has(t.id);
                     return (
