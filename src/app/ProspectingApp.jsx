@@ -251,6 +251,18 @@ export default function ProspectingApp() {
   // ---------- Save / Unsave ----------
   const isSaved = (est) => {
     if (!est) return false;
+    // For manual accounts (no taxpayer_number), check by id or name+address
+    if (!est.taxpayer_number || !est.location_number) {
+      if (est.id) {
+        return savedAccounts.some((a) => a.id === est.id);
+      }
+      // Check by name and address for unsaved manual accounts
+      const name = est.location_name || est.name || '';
+      const addr = est.location_address || est.address || '';
+      return savedAccounts.some((a) => 
+        a.name === name && a.address === addr
+      );
+    }
     const key = `${est.taxpayer_number}-${est.location_number}`;
     return savedAccounts.some((a) => `${a.notes || ""}`.includes(key) || false);
   };
@@ -262,7 +274,12 @@ export default function ProspectingApp() {
     // Your table is: accounts(id, name, address, lat, lng, notes, created_at)
     // We store the taxpayer/location ids inside "notes" so we can match later.
     const info = selectedEstablishment.info;
-    const key = `${info.taxpayer_number}-${info.location_number}`;
+    
+    // For manual accounts (no taxpayer_number), generate a unique key from name and address
+    const isManual = !info.taxpayer_number;
+    const key = isManual 
+      ? `MANUAL:${info.location_name || ''}-${info.location_address || ''}` 
+      : `${info.taxpayer_number}-${info.location_number}`;
 
     // If already saved, delete from backend and refresh saved list
     if (isSaved(info)) {
@@ -305,11 +322,18 @@ export default function ProspectingApp() {
       console.error("Geocoding error:", e);
     }
 
+    // For manual accounts, use the lat/lng from the info if available
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      console.log("Falling back to pseudo coordinates");
-      const pseudo = pseudoLatLng(info.taxpayer_number);
-      lat = pseudo.lat;
-      lng = pseudo.lng;
+      if (Number.isFinite(info.lat) && Number.isFinite(info.lng)) {
+        lat = info.lat;
+        lng = info.lng;
+        console.log("Using coordinates from info:", lat, lng);
+      } else {
+        console.log("Falling back to pseudo coordinates");
+        const pseudo = pseudoLatLng(info.taxpayer_number || info.location_name || addr);
+        lat = pseudo.lat;
+        lng = pseudo.lng;
+      }
     }
 
     try {
@@ -350,7 +374,8 @@ export default function ProspectingApp() {
           activeOpp: selectedActiveOpp, 
           venueType: venueType, 
           venueTypeLocked: venueTypeLocked,
-          aiResponse: aiResponse || ""
+          aiResponse: aiResponse || "",
+          manual: !info.taxpayer_number // mark as manual if no taxpayer number
         }),
       };
 
@@ -367,6 +392,13 @@ export default function ProspectingApp() {
 
       // Reload saved
       await refreshSavedAccounts();
+      
+      // Close manual add panel if open
+      setManualAddOpen(false);
+      setManualQuery('');
+      setManualResults([]);
+      setManualSelected(null);
+      setManualGpvTier(null);
     } catch (err) {
       setError(err?.message || "Could not save.");
     }
@@ -1935,6 +1967,26 @@ export default function ProspectingApp() {
                           setManualSelected(r);
                           setManualResults([]);
                           setManualQuery('');
+                          
+                          // Open in detail view without saving (like searched accounts)
+                          setSelectedEstablishment({
+                            info: {
+                              location_name: r.name || 'Manual Account',
+                              location_address: r.address || '',
+                              location_city: manualCityFilter || '',
+                              taxpayer_name: r.name || 'Manual Account',
+                              lat: r.lat,
+                              lng: r.lng,
+                            },
+                            history: [],
+                          });
+                          
+                          // Trigger AI lookup
+                          fetchAiForInfo({ 
+                            location_name: r.name || 'Manual Account', 
+                            location_city: manualCityFilter || '', 
+                            taxpayer_name: r.name || 'Manual Account' 
+                          }, { updateState: true });
                         }}
                       >
                         <div className="font-bold text-sm text-white">{r.name || 'Unnamed'}</div>
@@ -1964,13 +2016,16 @@ export default function ProspectingApp() {
                     className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
                   />
 
-                  <div className="mt-2">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">GPV Tier</div>
+                  <div className="mt-3">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">GPV Tier (Required)</div>
                     <div className="flex gap-2 flex-wrap">
                       {GPV_TIERS.map((t) => (
                         <button
                           key={t.id}
-                          onClick={() => setManualGpvTier(t.id)}
+                          onClick={() => {
+                            setManualGpvTier(t.id);
+                            setSelectedGpvTier(t.id);
+                          }}
                           className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all border ${manualGpvTier === t.id ? 'opacity-100' : 'opacity-40'}`}
                           style={{ background: manualGpvTier === t.id ? t.color : 'transparent', color: manualGpvTier === t.id ? '#fff' : t.color, borderColor: t.color }}
                         >
@@ -1980,96 +2035,8 @@ export default function ProspectingApp() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
-                    <button
-                      onClick={async () => {
-                        setManualSaving(true);
-                        // Prepare payload and save
-                        const info = manualSelected || {};
-                        const name = (info.name || '').trim() || 'Manual Account';
-                        const address = (info.address || '').trim();
-
-                        // Use coordinates from Google Places if available, otherwise geocode
-                        let lat = info.lat;
-                        let lng = info.lng;
-
-                        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-                          // Fallback to pseudo coords if no valid coordinates
-                          const pseudo = pseudoLatLng(name || address || Date.now());
-                          lat = pseudo.lat; 
-                          lng = pseudo.lng;
-                        }
-
-                        const chosenTier = manualGpvTier || selectedGpvTier;
-                        const payload = {
-                          name,
-                          address,
-                          lat,
-                          lng,
-                          notes: JSON.stringify({ manual: true, gpvTier: chosenTier, activeOpp: selectedActiveOpp, activeAccount: selectedActiveAccount, venueType: venueType, venueTypeLocked: venueTypeLocked })
-                        };
-                        try {
-                          const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                          if (!res.ok) throw new Error('Save failed');
-                          const created = await res.json();
-                          await refreshSavedAccounts();
-
-                          // open the newly created account in the detail panel so SaveButton shows as saved
-                          setSelectedEstablishment({
-                            info: {
-                              id: created.id,
-                              location_name: created.name,
-                              location_address: created.address,
-                              lat: created.lat,
-                              lng: created.lng,
-                              notes: created.notes,
-                            },
-                            history: [],
-                          });
-
-                          // Run AI lookup, show loading, and persist the AI response on the saved account
-                          try {
-                            const aiText = await fetchAiForInfo({ location_name: name, location_city: manualCityFilter || '', taxpayer_name: name }, { updateState: true });
-                            try {
-                              // Merge into existing notes JSON
-                              const parsed = (() => {
-                                try { return typeof created.notes === 'string' ? JSON.parse(created.notes) : created.notes || {}; } catch { return {}; }
-                              })();
-                              parsed.aiResponse = aiText || parsed.aiResponse || "";
-                              // Persist AI response to the account row
-                              await fetch(`/api/accounts?id=${created.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes: JSON.stringify(parsed) }) });
-                              await refreshSavedAccounts();
-                              setSelectedGpvTier(chosenTier || null);
-                            } catch (e) {
-                              console.error('Failed to persist AI response on saved account', e);
-                            }
-                          } catch (e) {
-                            console.error('AI lookup for new account failed', e);
-                          }
-
-                          setManualAddOpen(false);
-                          setManualQuery('');
-                          setManualResults([]);
-                          setManualSelected(null);
-                        } catch (err) {
-                          setError(err?.message || 'Could not save account.');
-                        } finally {
-                          setManualSaving(false);
-                        }
-                      }}
-                      className={`bg-indigo-600 px-3 py-2 rounded-xl text-[12px] font-black uppercase ${manualSaving ? 'opacity-60' : ''}`}
-                      disabled={manualSaving}
-                    >
-                      {manualSaving ? (
-                        <>
-                          <Loader2 size={14} className="inline-block animate-spin mr-2" />
-                          Saving...
-                        </>
-                      ) : (
-                        'Save Account'
-                      )}
-                    </button>
-                    <button onClick={() => setManualAddOpen(false)} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700">Cancel</button>
+                  <div className="text-[10px] text-slate-400 mt-3">
+                    Click a search result to preview, select GPV tier, then use the Save button at the top to save the account.
                   </div>
                 </div>
               </div>
