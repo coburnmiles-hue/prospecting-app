@@ -233,11 +233,11 @@ export default function PersonalMetrics({ data, onActivityClick }) {
         };
 
         const prospectingMatrix = [1, 2].map((rIdx) => {
-          return [1, 2, 3, 4, 5].map((cIdx) => safe(rIdx, cIdx));
+          return [3, 4, 5, 6, 7].map((cIdx) => safe(rIdx, cIdx));
         });
 
-        const walkInsPerOpp = { label: safe(1, 7), value: safe(2, 7) };
-        const wonValueMatrix = [9, 10].map((cIdx) => [safe(1, cIdx), safe(2, cIdx)]);
+        const walkInsPerOpp = { label: safe(1, 9), value: safe(2, 9) };
+        const wonValueMatrix = [11, 12].map((cIdx) => [safe(1, cIdx), safe(2, cIdx)]);
 
         return (
           <>
