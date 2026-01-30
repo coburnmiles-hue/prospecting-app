@@ -149,6 +149,8 @@ export default function ProspectingApp() {
   const [routeLoading, setRouteLoading] = useState(false);
   const routePolylineRef = useRef(null);
   const [routeError, setRouteError] = useState("");
+  const [savedRoutes, setSavedRoutes] = useState([]);
+  const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
 
   // Map
   const mapRef = useRef(null);
@@ -393,12 +395,52 @@ export default function ProspectingApp() {
       // Reload saved
       await refreshSavedAccounts();
       
-      // Close manual add panel if open
-      setManualAddOpen(false);
-      setManualQuery('');
-      setManualResults([]);
-      setManualSelected(null);
-      setManualGpvTier(null);
+      // For manual accounts, keep the account selected and load the saved data
+      if (isManual) {
+        // Find the newly saved account
+        const updatedAccounts = await fetch('/api/accounts').then(r => r.json());
+        const newlySaved = updatedAccounts.find(a => {
+          const aName = (a.name || '').toLowerCase();
+          const aAddr = (a.address || '').toLowerCase();
+          const infoName = (info.location_name || '').toLowerCase();
+          const infoAddr = (info.location_address || '').toLowerCase();
+          return aName === infoName && aAddr === infoAddr;
+        });
+        
+        if (newlySaved) {
+          const parsed = parseSavedNotes(newlySaved.notes);
+          // Keep the establishment selected with the saved GPV tier
+          setSelectedEstablishment({
+            info: {
+              id: newlySaved.id,
+              location_name: newlySaved.name,
+              location_address: newlySaved.address,
+              lat: newlySaved.lat,
+              lng: newlySaved.lng,
+              notes: newlySaved.notes,
+            },
+            history: parsed?.history || [],
+          });
+          // Restore the saved GPV tier to the UI
+          if (parsed?.gpvTier) {
+            setSelectedGpvTier(parsed.gpvTier);
+            setManualGpvTier(parsed.gpvTier);
+          }
+        }
+        
+        // Close manual add panel
+        setManualAddOpen(false);
+        setManualQuery('');
+        setManualResults([]);
+        setManualSelected(null);
+      } else {
+        // For regular accounts, keep existing behavior
+        setManualAddOpen(false);
+        setManualQuery('');
+        setManualResults([]);
+        setManualSelected(null);
+        setManualGpvTier(null);
+      }
     } catch (err) {
       setError(err?.message || "Could not save.");
     }
@@ -829,6 +871,22 @@ export default function ProspectingApp() {
     await fetchAiForInfo(info, { updateState: true });
   };
 
+  // Fetch saved routes
+  const fetchSavedRoutes = async () => {
+    setSavedRoutesLoading(true);
+    try {
+      const response = await fetch('/api/saved-routes');
+      if (response.ok) {
+        const data = await response.json();
+        setSavedRoutes(data);
+      }
+    } catch (error) {
+      console.error('Error fetching saved routes:', error);
+    } finally {
+      setSavedRoutesLoading(false);
+    }
+  };
+
   // Auto-trigger AI lookup when an account is selected (but only if no AI response exists)
   useEffect(() => {
     console.log("AI lookup useEffect triggered. selectedEstablishment:", !!selectedEstablishment, "aiResponse:", aiResponse ? "HAS VALUE" : "EMPTY", "skipFlag:", skipAiLookupRef.current);
@@ -845,6 +903,13 @@ export default function ProspectingApp() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment]);
+
+  // Fetch saved routes when Data tab is opened
+  useEffect(() => {
+    if (viewMode === "metrics") {
+      fetchSavedRoutes();
+    }
+  }, [viewMode]);
 
   // ---------- Map setup ----------
 
@@ -1106,41 +1171,15 @@ export default function ProspectingApp() {
       // When a marker is clicked, surface the account and open the coord editor
 
   
-      // Open popup and surface account detail; attach popup handler for "Add To Route"
-      marker.on('click', () => {
-        try {
-          // Center the map on the pin without changing zoom
-          try {
-            if (mapInstance.current && mapInstance.current.panTo) {
-              mapInstance.current.panTo([row.lat, row.lng]);
-            } else if (mapInstance.current && mapInstance.current.setView) {
-              mapInstance.current.setView([row.lat, row.lng], mapInstance.current.getZoom(), { animate: true });
-            }
-          } catch (e) {}
-
-          // Open the popup but do not auto-zoom
-          try { marker.openPopup(); } catch (e) {}
-
-          const parsed = parseSavedNotes(row.notes);
-          const keyParts = parsed?.key ? parsed.key.split('-') : [];
-
-          // Set the selected establishment so the detail panel data is ready if user opens it,
-          // but do NOT switch views automatically so the popup remains visible.
-          setSelectedEstablishment({
-            info: {
-              id: row.id,
-              location_name: row.name || row.location_name,
-              location_address: row.address || row.location_address,
-              taxpayer_number: keyParts[0] || undefined,
-              location_number: keyParts[1] || undefined,
-              lat: row.lat,
-              lng: row.lng,
-            },
-            history: Array.isArray(parsed?.history) ? parsed.history : [],
-          });
-        } catch (e) {
-          // ignore
+      // Open popup immediately on marker click - simplified for better responsiveness
+      marker.on('click', (e) => {
+        // Prevent event bubbling
+        if (e.originalEvent) {
+          e.originalEvent.stopPropagation();
         }
+        
+        // Open popup immediately without any map movement
+        marker.openPopup();
       });
 
       // Popup buttons dispatch CustomEvents handled globally; no per-popup DOM wiring needed here.
@@ -1291,6 +1330,12 @@ export default function ProspectingApp() {
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
+    // Skip auto-selection for manual accounts without history
+    const isManual = !selectedEstablishment?.info?.taxpayer_number;
+    if (isManual && (!selectedEstablishment?.history || selectedEstablishment.history.length === 0)) {
+      return;
+    }
+    
     if (stats?.total) {
       const total = stats.total;
       let tier = null;
@@ -1776,7 +1821,7 @@ export default function ProspectingApp() {
             }}
             active={viewMode === "metrics"}
           >
-            <TrendingUp size={14} className="inline mr-2 -mt-0.5" /> Metrics
+            <TrendingUp size={14} className="inline mr-2 -mt-0.5" /> Data
           </TabButton>
 
           <TabButton
@@ -1863,18 +1908,67 @@ export default function ProspectingApp() {
                       <span>Est. Time:</span>
                       <span>{Math.round(calculatedRoute.duration / 60)} min</span>
                     </div>
-                    <button
-                      onClick={() => {
-                        const waypoints = selectedForRoute.map(id => {
-                          const account = savedAccounts.find(a => a.id === id);
-                          return `${account.lat},${account.lng}`;
-                        }).join('/');
-                        window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
-                      }}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl mt-2"
-                    >
-                      Open in Google Maps
-                    </button>
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const today = new Date().toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric', 
+                              year: 'numeric' 
+                            });
+                            const routeData = {
+                              accounts: selectedForRoute.map(id => {
+                                const account = savedAccounts.find(a => a.id === id);
+                                return {
+                                  id: account.id,
+                                  name: account.name,
+                                  address: account.address,
+                                  lat: account.lat,
+                                  lng: account.lng,
+                                };
+                              }),
+                              distance: calculatedRoute.distance,
+                              duration: calculatedRoute.duration,
+                              polyline: calculatedRoute.polyline,
+                            };
+                            
+                            const response = await fetch('/api/saved-routes', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                name: `Route - ${today}`,
+                                routeData,
+                              }),
+                            });
+                            
+                            if (response.ok) {
+                              alert('Route saved successfully!');
+                            } else {
+                              alert('Failed to save route');
+                            }
+                          } catch (err) {
+                            console.error('Save route error:', err);
+                            alert('Error saving route');
+                          }
+                        }}
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl"
+                      >
+                        Save Route
+                      </button>
+                      <button
+                        onClick={() => {
+                          const waypoints = selectedForRoute.map(id => {
+                            const account = savedAccounts.find(a => a.id === id);
+                            return `${account.lat},${account.lng}`;
+                          }).join('/');
+                          window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
+                        }}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl"
+                      >
+                        Open in Maps
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2060,16 +2154,111 @@ export default function ProspectingApp() {
         {/* Right column */}
         <section className={viewMode === "metrics" ? "lg:col-span-12" : "lg:col-span-8"}>
           {viewMode === "metrics" ? (
-            metricsLoading ? (
-              <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
-                <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
-                <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
-                <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
-                  Fetching data from Google Sheets...
-                </p>
+            <div className="space-y-6">
+              {/* Saved Routes Section */}
+              <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-2xl">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Saved Routes</h2>
+                  <button
+                    onClick={fetchSavedRoutes}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {savedRoutesLoading ? (
+                  <div className="text-center py-8">
+                    <Loader2 size={32} className="text-indigo-600 animate-spin mx-auto" />
+                  </div>
+                ) : savedRoutes.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400">
+                    <p className="text-sm">No saved routes yet. Create a route in the Saved tab to save it here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {savedRoutes.map((route) => {
+                      const routeData = typeof route.route_data === 'string' ? JSON.parse(route.route_data) : route.route_data;
+                      return (
+                        <div key={route.id} className="bg-slate-900/50 border border-slate-700 rounded-2xl p-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <h3 className="text-white font-bold text-sm mb-1">{route.name}</h3>
+                              <p className="text-slate-400 text-[10px] uppercase tracking-widest">
+                                {new Date(route.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                if (confirm('Delete this route?')) {
+                                  try {
+                                    const response = await fetch(`/api/saved-routes?id=${route.id}`, { method: 'DELETE' });
+                                    if (response.ok) {
+                                      await fetchSavedRoutes();
+                                    }
+                                  } catch (error) {
+                                    console.error('Delete error:', error);
+                                  }
+                                }
+                              }}
+                              className="text-slate-400 hover:text-red-400 text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4 mb-3">
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Distance</div>
+                              <div className="text-emerald-400 font-bold text-sm">
+                                {(routeData.distance / 1609.34).toFixed(1)} mi
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Duration</div>
+                              <div className="text-emerald-400 font-bold text-sm">
+                                {Math.round(routeData.duration / 60)} min
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mb-3">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Stops ({routeData.accounts.length})</div>
+                            <div className="space-y-1">
+                              {routeData.accounts.map((account, idx) => (
+                                <div key={idx} className="text-[11px] text-slate-300 flex items-center gap-2">
+                                  <span className="bg-indigo-600 rounded-full w-5 h-5 flex items-center justify-center text-white font-bold text-[9px]">
+                                    {idx + 1}
+                                  </span>
+                                  {account.name}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const waypoints = routeData.accounts.map(a => `${a.lat},${a.lng}`).join('/');
+                              window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
+                            }}
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl transition-all"
+                          >
+                            Open in Google Maps
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            ) : (
-              <PersonalMetrics 
+
+              {/* Metrics Section */}
+              {metricsLoading ? (
+                <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
+                  <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
+                  <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
+                  <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
+                    Fetching data from Google Sheets...
+                  </p>
+                </div>
+              ) : (
+                <PersonalMetrics 
                 data={metricsData} 
                 onActivityClick={async (accountId) => {
                   // Switch to saved view and select the account
@@ -2102,7 +2291,8 @@ export default function ProspectingApp() {
                   }
                 }}
               />
-            )
+              )}
+            </div>
           ) : savedSubView === "map" ? (
             <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] flex flex-col">
               <div className="p-6 border-b border-slate-700 bg-slate-900/80 flex items-center justify-between z-[1000] backdrop-blur-md">
