@@ -1141,7 +1141,11 @@ export default function ProspectingApp() {
         // Use saved venue type or default
         const vt = parsed?.venueType || 'casual_dining';
         const cfg = VENUE_TYPES[vt] || VENUE_TYPES.casual_dining;
-        const estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
+        let estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
+        // For fine dining, multiply food portion by 1.75
+        if (vt === 'fine_dining') {
+          estFood = estFood * 1.75;
+        }
         const forecast = avgAlc + estFood;
         if (forecast > 0) {
           forecastHtml = `<div style="color: #10b981; font-size: 11px; font-weight: 800; margin-bottom: 8px;">Monthly Forecast: ${formatCurrency(forecast)}</div>`;
@@ -1324,7 +1328,11 @@ export default function ProspectingApp() {
     const filtered = h.filter((m) => m.total > 0);
     const avgAlc = filtered.length > 0 ? (filtered.reduce((sum, m) => sum + m.total, 0) / filtered.length) : 0;
     const cfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
-    const estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
+    let estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
+    // For fine dining, multiply food portion by 1.75
+    if (venueType === 'fine_dining') {
+      estFood = estFood * 1.75;
+    }
     return { avgAlc, estFood, total: avgAlc + estFood, cfg };
   }, [selectedEstablishment, venueType]);
 
