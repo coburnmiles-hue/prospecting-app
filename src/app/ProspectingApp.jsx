@@ -1107,6 +1107,14 @@ export default function ProspectingApp() {
       return { ...row, lat: pseudo.lat, lng: pseudo.lng };
     });
 
+    // Track coordinates to detect duplicates and apply offset
+    const coordsCount = new Map();
+    pins.forEach((row) => {
+      const key = `${row.lat.toFixed(6)},${row.lng.toFixed(6)}`;
+      coordsCount.set(key, (coordsCount.get(key) || 0) + 1);
+    });
+    const coordsOffset = new Map();
+
     pins.forEach((row) => {
       // Determine pin color by GPV tier if present
       const parsed = parseSavedNotes(row.notes);
@@ -1149,7 +1157,21 @@ export default function ProspectingApp() {
         });
       }
 
-      const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(mapInstance.current);
+      // Apply small offset if multiple markers share the same coordinates
+      let markerLat = row.lat;
+      let markerLng = row.lng;
+      const coordKey = `${row.lat.toFixed(6)},${row.lng.toFixed(6)}`;
+      if (coordsCount.get(coordKey) > 1) {
+        const offsetIndex = coordsOffset.get(coordKey) || 0;
+        coordsOffset.set(coordKey, offsetIndex + 1);
+        // Apply small offset in a circular pattern
+        const angle = (offsetIndex * 2 * Math.PI) / coordsCount.get(coordKey);
+        const offsetDistance = 0.0002; // approximately 20 meters
+        markerLat += offsetDistance * Math.sin(angle);
+        markerLng += offsetDistance * Math.cos(angle);
+      }
+
+      const marker = L.marker([markerLat, markerLng], { icon: markerIcon }).addTo(mapInstance.current);
 
       // Bind a small label under the pin; visibility controlled by zoom level
       try {
