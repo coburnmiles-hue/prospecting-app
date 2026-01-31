@@ -1693,6 +1693,13 @@ export default function ProspectingApp() {
         ? data.address || ""
         : `${data.location_city || ""}${data.location_city ? ", " : ""}TX`;
 
+    const metric =
+      viewMode === "top" && data.avg_monthly_volume
+        ? formatCurrency(data.avg_monthly_volume)
+        : viewMode === "search" && data.total_receipts
+        ? formatCurrency(data.total_receipts)
+        : null;
+
     const itemKey =
       viewMode === "saved"
         ? `${data.id || data.name}-${data.created_at || ""}`
@@ -1746,6 +1753,7 @@ export default function ProspectingApp() {
         isActive={isActive}
         title={title}
         subtitle={subtitle}
+        metric={metric}
         showDelete={viewMode === "saved"}
         onDelete={viewMode === "saved" ? async () => {
           if (!data.id) return;
@@ -1908,7 +1916,6 @@ export default function ProspectingApp() {
               setAiResponse("");
             }}
             active={viewMode === "saved"}
-            badge={savedAccounts.length}
           >
             <Bookmark size={14} className="inline mr-2 -mt-0.5" /> Saved
           </TabButton>
@@ -2256,6 +2263,51 @@ export default function ProspectingApp() {
         <section className={viewMode === "metrics" ? "lg:col-span-12" : "lg:col-span-8"}>
           {viewMode === "metrics" ? (
             <div className="space-y-6">
+              {/* Metrics Section */}
+              {metricsLoading ? (
+                <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
+                  <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
+                  <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
+                  <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
+                    Fetching data from Google Sheets...
+                  </p>
+                </div>
+              ) : (
+                <PersonalMetrics 
+                data={metricsData} 
+                onActivityClick={async (accountId) => {
+                  // Switch to saved view and select the account
+                  setViewMode('saved');
+                  setSavedSubView('info');
+                  
+                  // Find the account in savedAccounts
+                  const account = savedAccounts.find(a => a.id === accountId);
+                  if (account) {
+                    // Create establishment object from saved account
+                    try {
+                      const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
+                      const keyParts = parsed?.key ? parsed.key.split('-') : [];
+                      
+                      setSelectedEstablishment({
+                        info: {
+                          id: account.id,
+                          location_name: account.name,
+                          location_address: account.address,
+                          taxpayer_number: keyParts[0] || undefined,
+                          location_number: keyParts[1] || undefined,
+                          lat: account.lat,
+                          lng: account.lng,
+                        },
+                        history: Array.isArray(parsed?.history) ? parsed.history : [],
+                      });
+                    } catch (e) {
+                      console.error('Failed to load account:', e);
+                    }
+                  }
+                }}
+              />
+              )}
+
               {/* Saved Routes Section */}
               <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-2xl">
                 <div className="flex items-center justify-between mb-6">
@@ -2348,51 +2400,6 @@ export default function ProspectingApp() {
                   </div>
                 )}
               </div>
-
-              {/* Metrics Section */}
-              {metricsLoading ? (
-                <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
-                  <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
-                  <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
-                  <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
-                    Fetching data from Google Sheets...
-                  </p>
-                </div>
-              ) : (
-                <PersonalMetrics 
-                data={metricsData} 
-                onActivityClick={async (accountId) => {
-                  // Switch to saved view and select the account
-                  setViewMode('saved');
-                  setSavedSubView('info');
-                  
-                  // Find the account in savedAccounts
-                  const account = savedAccounts.find(a => a.id === accountId);
-                  if (account) {
-                    // Create establishment object from saved account
-                    try {
-                      const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
-                      const keyParts = parsed?.key ? parsed.key.split('-') : [];
-                      
-                      setSelectedEstablishment({
-                        info: {
-                          id: account.id,
-                          location_name: account.name,
-                          location_address: account.address,
-                          taxpayer_number: keyParts[0] || undefined,
-                          location_number: keyParts[1] || undefined,
-                          lat: account.lat,
-                          lng: account.lng,
-                        },
-                        history: Array.isArray(parsed?.history) ? parsed.history : [],
-                      });
-                    } catch (e) {
-                      console.error('Failed to load account:', e);
-                    }
-                  }
-                }}
-              />
-              )}
             </div>
           ) : savedSubView === "map" ? (
             <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
