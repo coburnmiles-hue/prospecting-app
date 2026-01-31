@@ -847,6 +847,46 @@ export default function ProspectingApp() {
     }
   };
 
+  // Refresh AI for a saved account and update the database
+  const refreshAiForSavedAccount = async () => {
+    if (!selectedEstablishment || !selectedEstablishment.info) return;
+    const info = selectedEstablishment.info;
+    
+    // Must be a saved account
+    if (!info.id) return;
+    
+    const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => a.id === info.id);
+    if (!saved) return;
+    
+    try {
+      // Fetch new AI response
+      const newAiResponse = await fetchAiForInfo(info, { updateState: true });
+      
+      // Update the account in the database with new AI response
+      const parsed = parseSavedNotes(saved.notes);
+      const updatedNotes = JSON.stringify({
+        ...parsed,
+        aiResponse: newAiResponse
+      });
+      
+      const res = await fetch(`/api/accounts?id=${saved.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes: updatedNotes
+        })
+      });
+      
+      if (res.ok) {
+        // Refresh saved accounts list
+        await refreshSavedAccounts();
+      }
+    } catch (err) {
+      console.error('Failed to refresh AI:', err);
+      setError(err?.message || 'Failed to refresh AI');
+    }
+  };
+
   // Backwards-compatible wrapper: trigger AI lookup for selectedEstablishment using fetchAiForInfo
   const performIntelligenceLookup = async () => {
     if (!selectedEstablishment || !selectedEstablishment.info) return;
@@ -2472,6 +2512,7 @@ export default function ProspectingApp() {
                 <AIIntelPanel
                   aiLoading={aiLoading}
                   aiResponse={aiResponse}
+                  onRefresh={selectedEstablishment?.info?.id ? refreshAiForSavedAccount : null}
                 />
                 {coordEditorOpen && (
                   <div className="mt-6 bg-[#071126] p-4 rounded-2xl border border-slate-700">

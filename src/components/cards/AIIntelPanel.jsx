@@ -1,8 +1,9 @@
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, RefreshCw } from "lucide-react";
 
 export default function AIIntelPanel({ 
   aiLoading, 
-  aiResponse
+  aiResponse,
+  onRefresh
 }) {
   // Parse the three sections from the response
   const parseSection = (text, sectionName) => {
@@ -18,17 +19,28 @@ export default function AIIntelPanel({
 
   return (
     <div className="bg-[#0F172A]/80 rounded-[2rem] border border-slate-700 p-8 mt-10">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="bg-indigo-600 p-2.5 rounded-xl">
-          {aiLoading ? (
-            <Loader2 className="text-white animate-spin" size={20} />
-          ) : (
-            <Sparkles className="text-white" size={20} />
-          )}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="bg-indigo-600 p-2.5 rounded-xl">
+            {aiLoading ? (
+              <Loader2 className="text-white animate-spin" size={20} />
+            ) : (
+              <Sparkles className="text-white" size={20} />
+            )}
+          </div>
+          <h3 className="text-[11px] font-black uppercase italic tracking-[0.2em] text-white">
+            AI Intel Radar
+          </h3>
         </div>
-        <h3 className="text-[11px] font-black uppercase italic tracking-[0.2em] text-white">
-          AI Intel Radar
-        </h3>
+        {onRefresh && !aiLoading && (
+          <button
+            onClick={onRefresh}
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase rounded-xl transition-colors"
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </button>
+        )}
       </div>
 
       {aiLoading ? (
