@@ -2395,39 +2395,32 @@ export default function ProspectingApp() {
               )}
             </div>
           ) : savedSubView === "map" ? (
-            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] flex flex-col">
-              <div className="p-6 border-b border-slate-700 bg-slate-900/80 flex items-center justify-between z-[1000] backdrop-blur-md">
-                <div className="flex items-center gap-4 flex-1">
-                  <div>
-                    <h2 className="text-xs font-black text-white uppercase italic tracking-[0.2em] flex items-center gap-2">
-                      <Navigation size={14} className="text-indigo-500" /> PORTFOLIO TERRITORY
-                    </h2>
-                  </div>
-                  <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                    <input
-                      type="text"
-                      placeholder="Search accounts..."
-                      value={mapSearch}
-                      onChange={(e) => setMapSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          searchMapAccounts(mapSearch);
-                        }
-                      }}
-                      className="w-full bg-slate-800/60 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
+            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
+              
+              {/* Floating search bar */}
+              <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3">
+                <div className="flex-1 max-w-md relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                  <input
+                    type="text"
+                    placeholder="Search accounts..."
+                    value={mapSearch}
+                    onChange={(e) => setMapSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        searchMapAccounts(mapSearch);
+                      }
+                    }}
+                    className="w-full bg-slate-900/90 backdrop-blur-md border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xl"
+                  />
                 </div>
-                <div className="flex gap-2">
-                  <div className="px-3 py-1 bg-slate-800 rounded-full border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
-                    {savedAccounts.length} SAVED PINS
-                  </div>
+                <div className="px-3 py-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2 shadow-xl">
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
+                  {savedAccounts.length} PINS
                 </div>
               </div>
 
-              <div className="absolute top-20 right-6 z-50 bg-slate-900/80 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
+              <div className="absolute top-24 right-6 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-black uppercase text-[10px] text-indigo-300">GPV Legend</div>
                   <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
@@ -2511,8 +2504,8 @@ export default function ProspectingApp() {
                 </div>
               </div>
 
-              <div className="flex-1 bg-[#020617] relative z-10">
-                <div ref={mapRef} className="absolute inset-0" />
+              <div className="absolute inset-0 bg-[#020617] z-10">
+                <div ref={mapRef} className="w-full h-full" />
 
                 {/* Legend buttons moved into the GPV legend above */}
               </div>
