@@ -2584,7 +2584,7 @@ export default function ProspectingApp() {
               </div>
 
               {/* Volume Adjuster + Historical Volume */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-6">
                 <VolumeAdjuster
                   venueTypes={VENUE_TYPES}
                   venueType={venueType}
@@ -2604,7 +2604,7 @@ export default function ProspectingApp() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={selectedEstablishment.history || []}
-                        margin={{ top: 10, right: 20, left: 0, bottom: 10 }}
+                        margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
                       >
                         <CartesianGrid vertical={false} stroke="#ffffff08" />
                         <XAxis
@@ -2614,7 +2614,13 @@ export default function ProspectingApp() {
                           tickLine={false}
                           dy={10}
                         />
-                        <YAxis hide domain={[0, "auto"]} />
+                        <YAxis 
+                          tick={{ fontSize: 10, fill: "#64748b", fontWeight: 800 }}
+                          axisLine={false}
+                          tickLine={false}
+                          domain={[0, "auto"]}
+                          tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                        />
                         <RechartsTooltip
                           cursor={{ fill: "#ffffff08" }}
                           contentStyle={{
