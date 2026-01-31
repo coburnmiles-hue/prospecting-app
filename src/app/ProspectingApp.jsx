@@ -159,6 +159,7 @@ export default function ProspectingApp() {
   const userLocationLayerRef = useRef(null);
   const LABEL_ZOOM_THRESHOLD = 13;
   const [legendOpen, setLegendOpen] = useState(true);
+  const [mapSearch, setMapSearch] = useState("");
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
@@ -302,7 +303,6 @@ export default function ProspectingApp() {
     // Use Google Geocoding API for accurate coordinates
     let lat, lng;
     try {
-      console.log("Geocoding address:", addr);
       const response = await fetch('/api/geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -311,11 +311,9 @@ export default function ProspectingApp() {
       
       if (response.ok) {
         const data = await response.json();
-        console.log("Geocoding response:", data);
         if (data.lat && data.lng) {
           lat = data.lat;
           lng = data.lng;
-          console.log("Using geocoded coordinates:", lat, lng);
         }
       } else {
         console.error("Geocoding failed:", response.status, await response.text());
@@ -381,8 +379,7 @@ export default function ProspectingApp() {
         }),
       };
 
-      console.log("Saving account with AI response:", aiResponse ? `${aiResponse.substring(0, 100)}...` : "EMPTY");
-      console.log("Full payload notes:", payload.notes);
+
 
       const res = await fetch("/api/accounts", {
         method: "POST",
@@ -732,7 +729,7 @@ export default function ProspectingApp() {
       }
 
       // Log what we're sending so we can debug origin issues locally
-      console.log('calculateRoute: origin ->', origin, 'waypoints ->', waypoints);
+
 
       // If origin equals the first waypoint then geolocation likely failed or was denied
       try {
@@ -929,17 +926,17 @@ export default function ProspectingApp() {
 
   // Auto-trigger AI lookup when an account is selected (but only if no AI response exists)
   useEffect(() => {
-    console.log("AI lookup useEffect triggered. selectedEstablishment:", !!selectedEstablishment, "aiResponse:", aiResponse ? "HAS VALUE" : "EMPTY", "skipFlag:", skipAiLookupRef.current);
+
     if (skipAiLookupRef.current) {
-      console.log("Skipping AI lookup - using cached response");
+
       skipAiLookupRef.current = false;
       return;
     }
     if (selectedEstablishment && selectedEstablishment.info && !aiResponse) {
-      console.log("Triggering AI lookup");
+
       performIntelligenceLookup();
     } else {
-      console.log("Skipping AI lookup - already have response or no establishment selected");
+
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment]);
@@ -995,14 +992,14 @@ export default function ProspectingApp() {
         baseLayer.on && baseLayer.on('tileerror', (err) => console.warn('Leaflet tileerror', err));
         baseLayer.on && baseLayer.on('tileload', (e) => {
           tileLoaded = true;
-          console.log('Leaflet tileload', e);
+
         });
 
         // If no tiles load within 2s, add an OSM fallback layer for debugging
         setTimeout(() => {
           try {
             const container = mapInstance.current.getContainer && mapInstance.current.getContainer();
-            console.log('Map container size (w,h):', mapInstance.current.getSize(), 'dom clientHeight:', container?.clientHeight);
+
           } catch (e) {}
 
           if (!tileLoaded) {
@@ -1010,7 +1007,7 @@ export default function ProspectingApp() {
               console.warn('No tiles loaded from primary provider; adding OSM fallback layer for debugging');
               const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
               osm.addTo(mapInstance.current);
-              osm.on && osm.on('tileload', (e) => console.log('OSM tileload', e));
+
               osm.on && osm.on('tileerror', (e) => console.warn('OSM tileerror', e));
             } catch (e) {
               console.error('Failed to add OSM fallback', e);
@@ -1023,16 +1020,29 @@ export default function ProspectingApp() {
 
       L.control.zoom({ position: "bottomright" }).addTo(mapInstance.current);
 
-      // Toggle pin label visibility based on zoom level
+      // Toggle pin label visibility and size based on zoom level
       try {
         mapInstance.current.on && mapInstance.current.on('zoomend', () => {
           try {
             const z = mapInstance.current.getZoom();
+            // Calculate pin size: larger when zoomed out, smaller when zoomed in
+            const baseSize = 32;
+            const scale = Math.max(0.5, Math.min(1, (15 - z) / 8)); // Scale from 0.5 to 1
+            const newSize = Math.round(baseSize * scale);
+            
             Object.values(markersRef.current || {}).forEach((m) => {
               try {
                 if (!m) return;
+                // Update tooltip visibility
                 if (typeof m.getTooltip === 'function') {
                   if (z >= LABEL_ZOOM_THRESHOLD) m.openTooltip(); else m.closeTooltip();
+                }
+                // Update pin size
+                const icon = m.getIcon();
+                if (icon && icon.options) {
+                  icon.options.iconSize = [newSize, newSize];
+                  icon.options.iconAnchor = [newSize / 2, newSize];
+                  m.setIcon(icon);
                 }
               } catch (e) {}
             });
@@ -1043,10 +1053,10 @@ export default function ProspectingApp() {
       // Expose map for console debugging and force a resize/invalidate to fix hidden container issues
       try {
         window._map = mapInstance.current;
-        console.log('Leaflet loaded, map exposed at window._map');
+
         mapInstance.current.whenReady(() => {
           try {
-            console.log('Map whenReady, size:', mapInstance.current.getSize());
+
             const container = mapInstance.current.getContainer();
             // If container has zero height, set a reasonable minHeight so tiles render
             if (container && container.clientHeight === 0) {
@@ -1059,7 +1069,7 @@ export default function ProspectingApp() {
           setTimeout(() => {
             try {
               mapInstance.current.invalidateSize();
-              console.log('Called invalidateSize() on map');
+
             } catch (e) {
               console.error('invalidateSize failed', e);
             }
@@ -1166,7 +1176,7 @@ export default function ProspectingApp() {
         coordsOffset.set(coordKey, offsetIndex + 1);
         // Apply small offset in a circular pattern
         const angle = (offsetIndex * 2 * Math.PI) / coordsCount.get(coordKey);
-        const offsetDistance = 0.0002; // approximately 20 meters
+        const offsetDistance = 0.0008; // approximately 80 meters for better separation
         markerLat += offsetDistance * Math.sin(angle);
         markerLng += offsetDistance * Math.cos(angle);
       }
@@ -1260,6 +1270,28 @@ export default function ProspectingApp() {
         mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
       } catch (e) {
         console.warn('fitBounds skipped due to invalid bounds or map state', e);
+      }
+    }
+  };
+
+  const searchMapAccounts = (searchTerm) => {
+    if (!searchTerm || !mapInstance.current) return;
+    
+    const term = searchTerm.toLowerCase().trim();
+    const matches = savedAccounts.filter(acc => 
+      (acc.name || '').toLowerCase().includes(term) || 
+      (acc.address || '').toLowerCase().includes(term)
+    );
+    
+    if (matches.length > 0) {
+      const firstMatch = matches[0];
+      const marker = markersRef.current[firstMatch.id?.toString()];
+      
+      if (marker) {
+        // Zoom to the marker
+        mapInstance.current.setView([firstMatch.lat, firstMatch.lng], 15);
+        // Open the popup
+        setTimeout(() => marker.openPopup(), 300);
       }
     }
   };
@@ -1525,8 +1557,7 @@ export default function ProspectingApp() {
     if (viewMode === "saved") {
       const parsed = parseSavedNotes(data.notes);
 
-      console.log("Clicked saved account, parsed data:", parsed);
-      console.log("AI Response in saved data:", parsed?.aiResponse);
+
 
       // Always restore GPV, Active Opp, venue type and notes owner for saved items (if present)
       setSelectedGpvTier(parsed?.gpvTier || null);
@@ -1540,12 +1571,12 @@ export default function ProspectingApp() {
       
       // Restore AI response FIRST for all saved accounts
       if (parsed?.aiResponse) {
-        console.log("Restoring cached AI response");
+
         skipAiLookupRef.current = true;
         setAiResponse(parsed.aiResponse);
         setAiLoading(false);
       } else {
-        console.log("No cached AI response found");
+
         skipAiLookupRef.current = false;
         setAiResponse("");
       }
@@ -2068,14 +2099,14 @@ export default function ProspectingApp() {
                               ...(manualCityFilter.trim() && { city: manualCityFilter.trim() })
                             });
                             const url = `/api/places?${params}`;
-                            console.log('Manual search URL:', url);
+
                             const res = await fetch(url);
                             if (!res.ok) {
                               const errData = await res.json().catch(() => ({}));
                               throw new Error(errData.error || `Search failed: ${res.status}`);
                             }
                             const data = await res.json();
-                            console.log('Manual search results:', data);
+
                             const results = data.results || [];
                             setManualResults(results);
                             if (results.length === 0) {
@@ -2366,10 +2397,27 @@ export default function ProspectingApp() {
           ) : savedSubView === "map" ? (
             <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] flex flex-col">
               <div className="p-6 border-b border-slate-700 bg-slate-900/80 flex items-center justify-between z-[1000] backdrop-blur-md">
-                <div>
-                  <h2 className="text-xs font-black text-white uppercase italic tracking-[0.2em] flex items-center gap-2">
-                    <Navigation size={14} className="text-indigo-500" /> PORTFOLIO TERRITORY
-                  </h2>
+                <div className="flex items-center gap-4 flex-1">
+                  <div>
+                    <h2 className="text-xs font-black text-white uppercase italic tracking-[0.2em] flex items-center gap-2">
+                      <Navigation size={14} className="text-indigo-500" /> PORTFOLIO TERRITORY
+                    </h2>
+                  </div>
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                    <input
+                      type="text"
+                      placeholder="Search accounts..."
+                      value={mapSearch}
+                      onChange={(e) => setMapSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          searchMapAccounts(mapSearch);
+                        }
+                      }}
+                      className="w-full bg-slate-800/60 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <div className="px-3 py-1 bg-slate-800 rounded-full border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2">
