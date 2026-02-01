@@ -165,6 +165,7 @@ export default function ProspectingApp() {
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
   const [visibleActiveAccounts, setVisibleActiveAccounts] = useState(true);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
+  const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
 
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
@@ -1138,6 +1139,12 @@ export default function ProspectingApp() {
       // If this is an Active Account pin and Active Account visibility is off, skip it
       if (parsed?.activeAccount && !visibleActiveAccounts) return;
       
+      // Check if account has notes (has been visited)
+      const hasNotes = parsed?.notes && Array.isArray(parsed.notes) && parsed.notes.length > 0;
+      
+      // If 'show unvisited only' is enabled, skip accounts that have notes
+      if (showUnvisitedOnly && hasNotes) return;
+      
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
@@ -1299,7 +1306,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (savedSubView === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -2490,6 +2497,15 @@ export default function ProspectingApp() {
                     >
                       <MapPin size={14} className="text-indigo-300" />
                       <span>My Location</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowUnvisitedOnly(v => !v)}
+                      title="Show unvisited accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showUnvisitedOnly ? 'bg-red-500 text-white border-red-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>Unvisited</span>
                     </button>
 
                     <button
