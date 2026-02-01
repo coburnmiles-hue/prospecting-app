@@ -1245,8 +1245,11 @@ export default function ProspectingApp() {
           <button onclick="window.dispatchEvent(new CustomEvent('prospect:viewDetails',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#0b1220;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;margin-bottom:8px;">
             View Details
           </button>
-          <button data-prospect-id="${row.id != null ? row.id : ''}" onclick="window.dispatchEvent(new CustomEvent('prospect:addToRoute',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'},lat:${row.lat},lng:${row.lng}}}))" style="display:block;width:100%;text-align:center;background:#111827;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;">
+          <button data-prospect-id="${row.id != null ? row.id : ''}" onclick="window.dispatchEvent(new CustomEvent('prospect:addToRoute',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'},lat:${row.lat},lng:${row.lng}}}))" style="display:block;width:100%;text-align:center;background:#111827;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;margin-bottom:8px;">
             Add To Route
+          </button>
+          <button onclick="window.dispatchEvent(new CustomEvent('prospect:removePin',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#7f1d1d;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #991b1b;">
+            Remove Pin
           </button>
         </div>
       `);
@@ -1341,8 +1344,33 @@ export default function ProspectingApp() {
 
     const onView = (e) => {
       try {
-        const id = e?.detail?.id;
+        const detail = e?.detail;
+        const id = detail?.id;
         if (id != null) {
+          // Find the account in savedAccounts
+          const account = savedAccounts.find(a => a.id === id);
+          if (account) {
+            // Parse notes to get history and other data
+            try {
+              const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
+              const keyParts = parsed?.key ? parsed.key.split('-') : [];
+              
+              setSelectedEstablishment({
+                info: {
+                  id: account.id,
+                  location_name: account.name,
+                  location_address: account.address,
+                  taxpayer_number: keyParts[0] || undefined,
+                  location_number: keyParts[1] || undefined,
+                  lat: account.lat,
+                  lng: account.lng,
+                },
+                history: Array.isArray(parsed?.history) ? parsed.history : [],
+              });
+            } catch (parseErr) {
+              console.error('Failed to parse account notes:', parseErr);
+            }
+          }
           setViewMode('saved');
           setSavedSubView('info');
         }
@@ -1351,13 +1379,34 @@ export default function ProspectingApp() {
       }
     };
 
+    const onRemove = async (e) => {
+      try {
+        const id = e?.detail?.id;
+        if (id != null) {
+          const confirmed = window.confirm('Remove this pin from your saved accounts?');
+          if (confirmed) {
+            await fetch(`/api/accounts?id=${id}`, { method: 'DELETE' });
+            await refreshSavedAccounts();
+            // Clear selected if it was the deleted account
+            if (selectedEstablishment?.info?.id === id) {
+              setSelectedEstablishment(null);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('removePin handler failed', err);
+      }
+    };
+
     window.addEventListener('prospect:addToRoute', onAdd);
     window.addEventListener('prospect:viewDetails', onView);
+    window.addEventListener('prospect:removePin', onRemove);
     return () => {
       window.removeEventListener('prospect:addToRoute', onAdd);
       window.removeEventListener('prospect:viewDetails', onView);
+      window.removeEventListener('prospect:removePin', onRemove);
     };
-  }, [setSelectedForRoute, setRoutePlanMode, setViewMode, setSavedSubView]);
+  }, [setSelectedForRoute, setRoutePlanMode, setViewMode, setSavedSubView, savedAccounts, refreshSavedAccounts, selectedEstablishment, setSelectedEstablishment]);
 
   // Reflect selectedForRoute state in any open/populated popup buttons
   useEffect(() => {
