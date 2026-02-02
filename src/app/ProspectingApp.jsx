@@ -79,8 +79,8 @@ export default function ProspectingApp() {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
   const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
 
-  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics
-  const [savedSubView, setSavedSubView] = useState("list"); // list | map
+  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics | map
+  const [savedSubView, setSavedSubView] = useState("list"); // list | info
 
   // Custom hooks for data fetching
   const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
@@ -160,6 +160,8 @@ export default function ProspectingApp() {
   const LABEL_ZOOM_THRESHOLD = 13;
   const [legendOpen, setLegendOpen] = useState(true);
   const [mapSearch, setMapSearch] = useState("");
+  const [mapSearchSuggestions, setMapSearchSuggestions] = useState([]);
+  const [showMapSuggestions, setShowMapSuggestions] = useState(false);
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
@@ -952,7 +954,7 @@ export default function ProspectingApp() {
   // ---------- Map setup ----------
 
   useEffect(() => {
-    if (savedSubView !== "map") return;
+    if (viewMode !== "map") return;
     if (!mapRef.current) return;
     if (mapInstance.current) return;
 
@@ -1096,7 +1098,7 @@ export default function ProspectingApp() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedSubView]);
+  }, [viewMode]);
 
   const updateMarkers = () => {
     if (!mapInstance.current || !window.L) return;
@@ -1284,6 +1286,25 @@ export default function ProspectingApp() {
     }
   };
 
+  const handleMapSearchInput = (value) => {
+    setMapSearch(value);
+    
+    if (!value.trim()) {
+      setMapSearchSuggestions([]);
+      setShowMapSuggestions(false);
+      return;
+    }
+    
+    const term = value.toLowerCase().trim();
+    const matches = savedAccounts.filter(acc => 
+      (acc.name || '').toLowerCase().includes(term) || 
+      (acc.address || '').toLowerCase().includes(term)
+    ).slice(0, 8); // Limit to 8 suggestions
+    
+    setMapSearchSuggestions(matches);
+    setShowMapSuggestions(matches.length > 0);
+  };
+
   const searchMapAccounts = (searchTerm) => {
     if (!searchTerm || !mapInstance.current) return;
     
@@ -1304,10 +1325,25 @@ export default function ProspectingApp() {
         setTimeout(() => marker.openPopup(), 300);
       }
     }
+    
+    setShowMapSuggestions(false);
+  };
+  
+  const selectMapSuggestion = (account) => {
+    setMapSearch(account.name || '');
+    setShowMapSuggestions(false);
+    
+    if (!mapInstance.current) return;
+    
+    const marker = markersRef.current[account.id?.toString()];
+    if (marker) {
+      mapInstance.current.setView([account.lat, account.lng], 15);
+      setTimeout(() => marker.openPopup(), 300);
+    }
   };
 
   useEffect(() => {
-    if (savedSubView === "map") updateMarkers();
+    if (viewMode === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly]);
 
@@ -1989,11 +2025,13 @@ export default function ProspectingApp() {
           </TabButton>
 
           <TabButton
-            onClick={() => setSavedSubView(savedSubView === "map" ? "list" : "map")}
-            active={savedSubView === "map"}
+            onClick={() => {
+              setViewMode("map");
+              setSelectedEstablishment(null);
+            }}
+            active={viewMode === "map"}
           >
-            <MapIcon size={14} className="inline mr-2 -mt-0.5" />{" "}
-            {savedSubView === "map" ? "Map Active" : "Show Map"}
+            <MapIcon size={14} className="inline mr-2 -mt-0.5" /> Map
           </TabButton>
         </div>
       </header>
@@ -2001,7 +2039,7 @@ export default function ProspectingApp() {
       {/* Main */}
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-12">
         {/* Left column */}
-        {viewMode !== "metrics" && (
+        {viewMode !== "metrics" && viewMode !== "map" && (
           <aside className="lg:col-span-4 space-y-6">
             {viewMode === "saved" ? (
                 <SavedAccountsHeader
@@ -2316,8 +2354,190 @@ export default function ProspectingApp() {
         )}
 
         {/* Right column */}
-        <section className={viewMode === "metrics" ? "lg:col-span-12" : "lg:col-span-8"}>
-          {viewMode === "metrics" ? (
+        <section className={viewMode === "metrics" || viewMode === "map" ? "lg:col-span-12" : "lg:col-span-8"}>
+          {viewMode === "map" ? (
+            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
+              
+              {/* Floating search bar */}
+              <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3">
+                <div className="flex-1 max-w-md relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                  <input
+                    type="text"
+                    placeholder="Search accounts..."
+                    value={mapSearch}
+                    onChange={(e) => handleMapSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        searchMapAccounts(mapSearch);
+                      } else if (e.key === 'Escape') {
+                        setShowMapSuggestions(false);
+                      }
+                    }}
+                    onBlur={() => setTimeout(() => setShowMapSuggestions(false), 200)}
+                    className="w-full bg-slate-900/90 backdrop-blur-md border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xl"
+                  />
+                  
+                  {/* Suggestions dropdown */}
+                  {showMapSuggestions && mapSearchSuggestions.length > 0 && (
+                    <div className="absolute top-full mt-2 left-0 right-0 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto">
+                      {mapSearchSuggestions.map((account) => {
+                        const parsed = (() => {
+                          try {
+                            return typeof account.data === "string"
+                              ? JSON.parse(account.data)
+                              : account.data || {};
+                          } catch { return {}; }
+                        })();
+                        
+                        // Determine GPV tier
+                        const total = account.total_receipts || 0;
+                        let tierId = 'tier1';
+                        if (total >= 1000000) tierId = 'tier6';
+                        else if (total >= 500000) tierId = 'tier5';
+                        else if (total >= 250000) tierId = 'tier4';
+                        else if (total >= 100000) tierId = 'tier3';
+                        else if (total >= 50000) tierId = 'tier2';
+                        
+                        const tierInfo = GPV_TIERS.find(t => t.id === tierId) || GPV_TIERS[0];
+                        
+                        return (
+                          <div
+                            key={account.id}
+                            onClick={() => selectMapSuggestion(account)}
+                            className="px-4 py-3 hover:bg-slate-800/60 cursor-pointer transition-colors border-b border-slate-700/50 last:border-b-0"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div 
+                                    className="w-2.5 h-2.5 rounded-full border-2 border-white flex-shrink-0" 
+                                    style={{ backgroundColor: tierInfo.color }}
+                                  />
+                                  <div className="font-medium text-white text-xs truncate">
+                                    {account.name}
+                                  </div>
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate">
+                                  {account.address}
+                                </div>
+                                {account.total_receipts && (
+                                  <div className="text-[10px] text-emerald-400 mt-1">
+                                    {formatCurrency(account.total_receipts)} GPV
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="px-3 py-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2 shadow-xl">
+                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
+                  {savedAccounts.length} PINS
+                </div>
+              </div>
+
+              <div className="absolute top-24 right-6 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-black uppercase text-[10px] text-indigo-300">GPV Legend</div>
+                  <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
+                    {legendOpen ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <div className={`flex flex-col gap-2 ${legendOpen ? '' : 'hidden'}`}>
+                  {GPV_TIERS.map((t) => {
+                    const isVisible = visibleTiers.has(t.id);
+                    return (
+                      <div 
+                        key={t.id} 
+                        className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
+                        onClick={() => {
+                          setVisibleTiers(prev => {
+                            const newSet = new Set(prev);
+                            if (newSet.has(t.id)) {
+                              newSet.delete(t.id);
+                            } else {
+                              newSet.add(t.id);
+                            }
+                            return newSet;
+                          });
+                        }}
+                      >
+                        <div style={{ 
+                          width: 14, 
+                          height: 14, 
+                          background: isVisible ? t.color : '#334155', 
+                          borderRadius: 6, 
+                          border: '2px solid #fff',
+                          opacity: isVisible ? 1 : 0.4
+                        }} />
+                        <div className="text-[11px] font-bold" style={{ opacity: isVisible ? 1 : 0.5 }}>{t.label}</div>
+                      </div>
+                    );
+                  })}
+                  <div
+                    className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
+                    onClick={() => setVisibleActiveAccounts(v => !v)}
+                  >
+                    <div style={{
+                      width: 14,
+                      height: 14,
+                      background: visibleActiveAccounts ? '#10b981' : '#334155',
+                      borderRadius: 6,
+                      border: '2px solid #fff',
+                      opacity: visibleActiveAccounts ? 1 : 0.4
+                    }} />
+                    <div className="text-[11px] font-bold" style={{ opacity: visibleActiveAccounts ? 1 : 0.5 }}>Active Account</div>
+                  </div>
+
+                  {/* Buttons placed directly under the GPV legend (stacked) */}
+                  <div className="mt-3 flex flex-col gap-2">
+                    <button
+                      onClick={handleMyLocation}
+                      title="My location"
+                      className="w-full px-3 py-1.5 rounded-md border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black"
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <MapPin size={14} className="text-indigo-300" />
+                      <span>My Location</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowUnvisitedOnly(v => !v)}
+                      title="Show unvisited accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showUnvisitedOnly ? 'bg-red-500 text-white border-red-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>Unvisited</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowActiveOnly(s => {
+                          const next = !s;
+                          if (next) setVisibleActiveAccounts(true);
+                          return next;
+                        });
+                      }}
+                      title="Show active accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showActiveOnly ? 'bg-amber-500 text-[#081113] border-amber-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span className="font-black">$</span>
+                      <span>Active Only</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="absolute inset-0 bg-[#020617] z-10">
+                <div ref={mapRef} className="w-full h-full" />
+              </div>
+            </div>
+          ) : viewMode === "metrics" ? (
             <div className="space-y-6">
               {/* Metrics Section */}
               {metricsLoading ? (
@@ -2455,131 +2675,6 @@ export default function ProspectingApp() {
                     })}
                   </div>
                 )}
-              </div>
-            </div>
-          ) : savedSubView === "map" ? (
-            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
-              
-              {/* Floating search bar */}
-              <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3">
-                <div className="flex-1 max-w-md relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                  <input
-                    type="text"
-                    placeholder="Search accounts..."
-                    value={mapSearch}
-                    onChange={(e) => setMapSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        searchMapAccounts(mapSearch);
-                      }
-                    }}
-                    className="w-full bg-slate-900/90 backdrop-blur-md border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xl"
-                  />
-                </div>
-                <div className="px-3 py-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2 shadow-xl">
-                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
-                  {savedAccounts.length} PINS
-                </div>
-              </div>
-
-              <div className="absolute top-24 right-6 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-black uppercase text-[10px] text-indigo-300">GPV Legend</div>
-                  <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
-                    {legendOpen ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-                <div className={`flex flex-col gap-2 ${legendOpen ? '' : 'hidden'}`}>
-                  {GPV_TIERS.map((t) => {
-                    const isVisible = visibleTiers.has(t.id);
-                    return (
-                      <div 
-                        key={t.id} 
-                        className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
-                        onClick={() => {
-                          setVisibleTiers(prev => {
-                            const newSet = new Set(prev);
-                            if (newSet.has(t.id)) {
-                              newSet.delete(t.id);
-                            } else {
-                              newSet.add(t.id);
-                            }
-                            return newSet;
-                          });
-                        }}
-                      >
-                        <div style={{ 
-                          width: 14, 
-                          height: 14, 
-                          background: isVisible ? t.color : '#334155', 
-                          borderRadius: 6, 
-                          border: '2px solid #fff',
-                          opacity: isVisible ? 1 : 0.4
-                        }} />
-                        <div className="text-[11px] font-bold" style={{ opacity: isVisible ? 1 : 0.5 }}>{t.label}</div>
-                      </div>
-                    );
-                  })}
-                  <div
-                    className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
-                    onClick={() => setVisibleActiveAccounts(v => !v)}
-                  >
-                    <div style={{
-                      width: 14,
-                      height: 14,
-                      background: visibleActiveAccounts ? '#10b981' : '#334155',
-                      borderRadius: 6,
-                      border: '2px solid #fff',
-                      opacity: visibleActiveAccounts ? 1 : 0.4
-                    }} />
-                    <div className="text-[11px] font-bold" style={{ opacity: visibleActiveAccounts ? 1 : 0.5 }}>Active Account</div>
-                  </div>
-
-                  {/* Buttons placed directly under the GPV legend (stacked) */}
-                  <div className="mt-3 flex flex-col gap-2">
-                    <button
-                      onClick={handleMyLocation}
-                      title="My location"
-                      className="w-full px-3 py-1.5 rounded-md border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black"
-                      style={{ backdropFilter: 'blur(4px)' }}
-                    >
-                      <MapPin size={14} className="text-indigo-300" />
-                      <span>My Location</span>
-                    </button>
-
-                    <button
-                      onClick={() => setShowUnvisitedOnly(v => !v)}
-                      title="Show unvisited accounts only"
-                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showUnvisitedOnly ? 'bg-red-500 text-white border-red-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
-                      style={{ backdropFilter: 'blur(4px)' }}
-                    >
-                      <span>Unvisited</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setShowActiveOnly(s => {
-                          const next = !s;
-                          if (next) setVisibleActiveAccounts(true);
-                          return next;
-                        });
-                      }}
-                      title="Show active accounts only"
-                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showActiveOnly ? 'bg-amber-500 text-[#081113] border-amber-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
-                      style={{ backdropFilter: 'blur(4px)' }}
-                    >
-                      <span className="font-black">$</span>
-                      <span>Active Only</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="absolute inset-0 bg-[#020617] z-10">
-                <div ref={mapRef} className="w-full h-full" />
-
-                {/* Legend buttons moved into the GPV legend above */}
               </div>
             </div>
           ) : selectedEstablishment ? (
