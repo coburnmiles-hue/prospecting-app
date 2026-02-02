@@ -2226,13 +2226,13 @@ export default function ProspectingApp() {
                       }
                     }}
                     placeholder="Search business name or address..."
-                    className="col-span-2 bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]"
+                    className="col-span-2 bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-base"
                   />
                   <input
                     value={manualCityFilter}
                     onChange={(e) => setManualCityFilter(e.target.value.toUpperCase())}
                     placeholder="Filter by city (optional)"
-                    className="bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]"
+                    className="bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-base"
                   />
                   <button
                     onClick={() => {
@@ -2375,7 +2375,7 @@ export default function ProspectingApp() {
                       }
                     }}
                     onBlur={() => setTimeout(() => setShowMapSuggestions(false), 200)}
-                    className="w-full bg-slate-900/90 backdrop-blur-md border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xl"
+                    className="w-full bg-slate-900/90 backdrop-blur-md border border-slate-700 text-white text-base rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xl"
                   />
                   
                   {/* Suggestions dropdown */}

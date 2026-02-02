@@ -7,7 +7,7 @@ export default function SearchInput({ value, onChange, placeholder, icon: Icon }
       <input
         type="text"
         placeholder={placeholder}
-        className={`w-full ${Icon ? 'pl-12' : 'pl-4'} ${value ? 'pr-10' : 'pr-4'} py-3.5 rounded-2xl bg-[#0F172A] border border-slate-700 text-white outline-none focus:ring-2 focus:ring-indigo-600 transition-all uppercase placeholder:text-slate-600`}
+        className={`w-full ${Icon ? 'pl-12' : 'pl-4'} ${value ? 'pr-10' : 'pr-4'} py-3.5 rounded-2xl bg-[#0F172A] border border-slate-700 text-white text-base outline-none focus:ring-2 focus:ring-indigo-600 transition-all uppercase placeholder:text-slate-600`}
         value={value}
         onChange={onChange}
       />
