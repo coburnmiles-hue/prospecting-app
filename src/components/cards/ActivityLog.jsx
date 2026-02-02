@@ -44,7 +44,7 @@ export default function ActivityLog({
       <div className="relative mb-6">
         <textarea
           placeholder="Enter follow-up details..."
-          className="w-full bg-[#0F172A] border border-slate-700 rounded-3xl p-6 text-[11px] font-bold text-slate-200 outline-none min-h-[110px] resize-none"
+          className="w-full bg-[#0F172A] border border-slate-700 rounded-3xl p-6 text-base font-bold text-slate-200 outline-none min-h-[110px] resize-none"
           value={currentNote}
           onChange={(e) => setCurrentNote(e.target.value)}
         />
