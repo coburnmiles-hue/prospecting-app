@@ -1476,10 +1476,82 @@ export default function ProspectingApp() {
         }
       }
 
+      // Check business hours status
+      let hoursStatusHtml = '';
+      if (parsed?.businessHours?.periods && Array.isArray(parsed.businessHours.periods)) {
+        const now = new Date();
+        const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentHour = now.getHours();
+        const currentMinute = now.getMinutes();
+        const currentTimeInMinutes = currentHour * 60 + currentMinute;
+        
+        // Find today's periods
+        const todayPeriods = parsed.businessHours.periods.filter(period => {
+          const dayValue = period.open?.day !== undefined ? period.open.day : null;
+          return dayValue === currentDay;
+        });
+
+        let isOpen = false;
+        let opensWithinHour = false;
+        let nextOpenTime = null;
+
+        todayPeriods.forEach(period => {
+          let openTime = 0;
+          let closeTime = 0;
+
+          // Parse open time
+          if (period.open?.time) {
+            const openStr = period.open.time.toString().padStart(4, '0');
+            openTime = parseInt(openStr.substring(0, 2)) * 60 + parseInt(openStr.substring(2, 4));
+          } else if (period.open?.hour !== undefined && period.open?.minute !== undefined) {
+            openTime = period.open.hour * 60 + period.open.minute;
+          }
+
+          // Parse close time
+          if (period.close?.time) {
+            const closeStr = period.close.time.toString().padStart(4, '0');
+            closeTime = parseInt(closeStr.substring(0, 2)) * 60 + parseInt(closeStr.substring(2, 4));
+          } else if (period.close?.hour !== undefined && period.close?.minute !== undefined) {
+            closeTime = period.close.hour * 60 + period.close.minute;
+          }
+
+          // Check if currently open
+          if (closeTime > openTime) {
+            // Same day hours
+            if (currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
+              isOpen = true;
+            }
+          } else if (closeTime < openTime) {
+            // Overnight hours
+            if (currentTimeInMinutes >= openTime || currentTimeInMinutes < closeTime) {
+              isOpen = true;
+            }
+          }
+
+          // Check if opens within next hour
+          if (!isOpen && openTime > currentTimeInMinutes && openTime <= currentTimeInMinutes + 60) {
+            opensWithinHour = true;
+            nextOpenTime = openTime;
+          }
+        });
+
+        if (isOpen) {
+          hoursStatusHtml = '<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #10b981; font-size: 11px; font-weight: 800;">● OPEN NOW</span></div>';
+        } else if (opensWithinHour) {
+          const hoursUntilOpen = Math.floor((nextOpenTime - currentTimeInMinutes) / 60);
+          const minsUntilOpen = (nextOpenTime - currentTimeInMinutes) % 60;
+          const timeStr = hoursUntilOpen > 0 ? `${hoursUntilOpen}h ${minsUntilOpen}m` : `${minsUntilOpen}m`;
+          hoursStatusHtml = `<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #eab308; font-size: 11px; font-weight: 800;">◐ OPENING SOON (${timeStr})</span></div>`;
+        } else {
+          hoursStatusHtml = '<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #ef4444; font-size: 11px; font-weight: 800;">● CLOSED</span></div>';
+        }
+      }
+
       marker.bindPopup(`
         <div style="font-family: ui-sans-serif, system-ui; padding: 10px; min-width: 220px;">
           <b style="text-transform: uppercase; display: block; margin-bottom: 6px; color: #fff; font-size: 13px;">${(row.name || "").toString()}</b>
           <span style="color: #94a3b8; font-size: 10px; display: block; margin-bottom: 12px; line-height: 1.4;">${(row.address || "").toString()}</span>
+          ${hoursStatusHtml}
           ${forecastHtml}
           <a href="${mapsUrl}" target="_blank" style="display:block;text-align:center;background:#4f46e5;color:white;text-decoration:none;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
             Get Directions
