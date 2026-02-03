@@ -168,6 +168,11 @@ export default function ProspectingApp() {
   const [visibleActiveAccounts, setVisibleActiveAccounts] = useState(true);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
+  const [showOpenOnly, setShowOpenOnly] = useState(false);
+
+  // Hours of operation
+  const [businessHours, setBusinessHours] = useState(null);
+  const [hoursLoading, setHoursLoading] = useState(false);
 
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
@@ -1147,6 +1152,17 @@ export default function ProspectingApp() {
       // If 'show unvisited only' is enabled, skip accounts that have notes
       if (showUnvisitedOnly && hasNotes) return;
       
+      // If 'show open only' is enabled, skip accounts that are closed
+      if (showOpenOnly) {
+        const businessHours = parsed?.businessHours;
+        console.log('Checking open status for:', row.name, { businessHours, openNow: businessHours?.openNow });
+        if (!businessHours || businessHours.openNow !== true) {
+          console.log('Filtering out (not open):', row.name);
+          return;
+        }
+        console.log('Keeping (open):', row.name);
+      }
+      
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
@@ -1305,6 +1321,39 @@ export default function ProspectingApp() {
     setShowMapSuggestions(matches.length > 0);
   };
 
+  // Fetch business hours when selectedEstablishment changes
+  useEffect(() => {
+    const fetchHours = async () => {
+      if (!selectedEstablishment?.info) {
+        setBusinessHours(null);
+        return;
+      }
+
+      const name = selectedEstablishment.info.location_name;
+      const address = getFullAddress(selectedEstablishment.info);
+      
+      if (!name || !address) return;
+
+      setHoursLoading(true);
+      try {
+        const response = await fetch(`/api/place-details?name=${encodeURIComponent(name)}&address=${encodeURIComponent(address)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setBusinessHours(data.hours);
+        } else {
+          setBusinessHours(null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch hours:', error);
+        setBusinessHours(null);
+      } finally {
+        setHoursLoading(false);
+      }
+    };
+
+    fetchHours();
+  }, [selectedEstablishment?.info?.id]);
+
   const searchMapAccounts = (searchTerm) => {
     if (!searchTerm || !mapInstance.current) return;
     
@@ -1342,10 +1391,103 @@ export default function ProspectingApp() {
     }
   };
 
+  // Fetch business hours when selectedEstablishment changes
+  useEffect(() => {
+    const fetchHours = async () => {
+      if (!selectedEstablishment?.info) {
+        setBusinessHours(null);
+        setHoursLoading(false);
+        return;
+      }
+
+      // Check if hours are already cached in the account data
+      try {
+        const notes = selectedEstablishment?.info?.notes || '';
+        const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
+        console.log('Checking for cached hours:', { hasNotes: !!notes, parsed, hasBizHours: !!parsed?.businessHours });
+        if (parsed?.businessHours) {
+          console.log('Using cached hours:', parsed.businessHours);
+          setBusinessHours(parsed.businessHours);
+          setHoursLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.error('Error parsing notes for cached hours:', e);
+        // Continue to fetch if parsing fails
+      }
+
+      const name = selectedEstablishment.info.location_name;
+      const address = getFullAddress(selectedEstablishment.info);
+      
+      if (!name || !address) {
+        setHoursLoading(false);
+        return;
+      }
+
+      console.log('Fetching hours from API for:', name);
+      setHoursLoading(true);
+      try {
+        const response = await fetch(`/api/place-details?name=${encodeURIComponent(name)}&address=${encodeURIComponent(address)}`);
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Received hours from API:', data.hours);
+          setBusinessHours(data.hours);
+          
+          // Save hours to the database if this is a saved account
+          if (selectedEstablishment?.info?.id && data.hours) {
+            try {
+              const notes = selectedEstablishment?.info?.notes || '';
+              const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes || {};
+              const updatedNotes = {
+                ...parsed,
+                businessHours: data.hours
+              };
+              
+              console.log('Saving hours to database:', updatedNotes);
+              const saveResponse = await fetch(`/api/accounts?id=${selectedEstablishment.info.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notes: JSON.stringify(updatedNotes) }),
+              });
+              
+              if (saveResponse.ok) {
+                console.log('Hours saved successfully');
+                // Refresh saved accounts to get the updated notes
+                await refreshSavedAccounts();
+                
+                // Update local state
+                setSelectedEstablishment((s) => s ? {
+                  ...s,
+                  info: {
+                    ...s.info,
+                    notes: JSON.stringify(updatedNotes)
+                  }
+                } : s);
+              } else {
+                console.error('Failed to save hours, response not ok:', saveResponse.status);
+              }
+            } catch (saveError) {
+              console.error('Failed to save hours to database:', saveError);
+            }
+          }
+        } else {
+          setBusinessHours(null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch hours:', error);
+        setBusinessHours(null);
+      } finally {
+        setHoursLoading(false);
+      }
+    };
+
+    fetchHours();
+  }, [selectedEstablishment?.info?.id]);
+
   useEffect(() => {
     if (viewMode === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showOpenOnly]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -1687,6 +1829,7 @@ export default function ProspectingApp() {
               location_address: data.address || "",
               taxpayer_number,
               location_number,
+              notes: data.notes, // Include notes so cached hours can be accessed
             },
             history: parsed.history,
           });
@@ -1737,7 +1880,15 @@ export default function ProspectingApp() {
         return;
       }
 
-      setSelectedEstablishment({ info: { id: data.id, location_name: data.name || "Saved Account", location_address: data.address || "" }, history: [] });
+      setSelectedEstablishment({ 
+        info: { 
+          id: data.id, 
+          location_name: data.name || "Saved Account", 
+          location_address: data.address || "",
+          notes: data.notes, // Include notes so cached hours can be accessed
+        }, 
+        history: [] 
+      });
       // If the map is visible, zoom to the saved pin and open its popup
       if (savedSubView === 'map' && mapInstance.current) {
         try {
@@ -2460,6 +2611,15 @@ export default function ProspectingApp() {
                       <span className="font-black">$</span>
                       <span>Active Only</span>
                     </button>
+
+                    <button
+                      onClick={() => setShowOpenOnly(v => !v)}
+                      title="Show only accounts that are currently open"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showOpenOnly ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>Open Now</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2665,6 +2825,40 @@ export default function ProspectingApp() {
                         <ExternalLink size={14} /> Navigate Now
                       </a>
                     </div>
+
+                    {/* Hours of Operation */}
+                    {hoursLoading ? (
+                      <div className="mt-4 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+                        Loading hours...
+                      </div>
+                    ) : businessHours?.weekdayDescriptions && businessHours.weekdayDescriptions.length > 0 ? (
+                      <div className="mt-4">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                          Hours of Operation
+                        </div>
+                        <div className="space-y-1">
+                          {businessHours.weekdayDescriptions.map((day, idx) => (
+                            <div key={idx} className="text-[11px] text-slate-300 font-medium">
+                              {day}
+                            </div>
+                          ))}
+                        </div>
+                        {businessHours.openNow !== undefined && (
+                          <div className="mt-2">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-black uppercase ${
+                              businessHours.openNow 
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                businessHours.openNow ? 'bg-emerald-500' : 'bg-rose-500'
+                              }`}></span>
+                              {businessHours.openNow ? 'Open Now' : 'Closed'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
 
                     <div className="flex items-center gap-3 shrink-0">
