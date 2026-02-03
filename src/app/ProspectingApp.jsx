@@ -1960,7 +1960,7 @@ export default function ProspectingApp() {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
       {/* Header */}
-      <header className="max-w-6xl mx-auto mb-10 flex flex-col md:flex-row justify-between items-center gap-6">
+      <header className="max-w-6xl mx-auto mb-10 flex justify-center items-center">
         <div className="flex items-center gap-4">
           <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg shadow-indigo-600/20">
             <Navigation className="text-white" size={28} />
@@ -1975,69 +1975,10 @@ export default function ProspectingApp() {
             </p>
           </div>
         </div>
-
-        <div className="flex bg-[#1E293B] p-1.5 rounded-2xl border border-slate-700 shadow-xl overflow-hidden">
-          <TabButton
-            onClick={() => {
-              setViewMode("search");
-              setSavedSubView("list");
-              setSelectedEstablishment(null);
-              setAiResponse("");
-            }}
-            active={viewMode === "search"}
-          >
-            <Search size={14} className="inline mr-2 -mt-0.5" /> Search
-          </TabButton>
-
-          <TabButton
-            onClick={() => {
-              setViewMode("top");
-              setSavedSubView("list");
-              setSelectedEstablishment(null);
-              setAiResponse("");
-            }}
-            active={viewMode === "top"}
-          >
-            <Trophy size={14} className="inline mr-2 -mt-0.5" /> Leaders
-          </TabButton>
-
-          <TabButton
-            onClick={() => {
-              setViewMode("saved");
-              setSelectedEstablishment(null);
-              setAiResponse("");
-            }}
-            active={viewMode === "saved"}
-          >
-            <Bookmark size={14} className="inline mr-2 -mt-0.5" /> Saved
-          </TabButton>
-
-          <TabButton
-            onClick={() => {
-              setViewMode("metrics");
-              setSavedSubView("list");
-              setSelectedEstablishment(null);
-              setAiResponse("");
-            }}
-            active={viewMode === "metrics"}
-          >
-            <TrendingUp size={14} className="inline mr-2 -mt-0.5" /> Data
-          </TabButton>
-
-          <TabButton
-            onClick={() => {
-              setViewMode("map");
-              setSelectedEstablishment(null);
-            }}
-            active={viewMode === "map"}
-          >
-            <MapIcon size={14} className="inline mr-2 -mt-0.5" /> Map
-          </TabButton>
-        </div>
       </header>
 
       {/* Main */}
-      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-12">
+      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
         {/* Left column */}
         {viewMode !== "metrics" && viewMode !== "map" && (
           <aside className="lg:col-span-4 space-y-6">
@@ -2496,16 +2437,6 @@ export default function ProspectingApp() {
                   {/* Buttons placed directly under the GPV legend (stacked) */}
                   <div className="mt-3 flex flex-col gap-2">
                     <button
-                      onClick={handleMyLocation}
-                      title="My location"
-                      className="w-full px-3 py-1.5 rounded-md border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black"
-                      style={{ backdropFilter: 'blur(4px)' }}
-                    >
-                      <MapPin size={14} className="text-indigo-300" />
-                      <span>My Location</span>
-                    </button>
-
-                    <button
                       onClick={() => setShowUnvisitedOnly(v => !v)}
                       title="Show unvisited accounts only"
                       className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showUnvisitedOnly ? 'bg-red-500 text-white border-red-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
@@ -2536,6 +2467,15 @@ export default function ProspectingApp() {
               <div className="absolute inset-0 bg-[#020617] z-10">
                 <div ref={mapRef} className="w-full h-full" />
               </div>
+
+              {/* My Location Button - Bottom Left */}
+              <button
+                onClick={handleMyLocation}
+                title="My location"
+                className="absolute bottom-6 left-6 z-[1000] p-4 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-indigo-400 hover:text-indigo-300 hover:bg-slate-800/90 transition-all shadow-2xl"
+              >
+                <MapPin size={24} />
+              </button>
             </div>
           ) : viewMode === "metrics" ? (
             <div className="space-y-6">
@@ -2906,6 +2846,75 @@ export default function ProspectingApp() {
           )}
         </section>
       </main>
+
+      {/* Fixed Bottom Navigation Dock */}
+      <nav className="fixed bottom-0 left-0 right-0 z-[9999] pb-safe">
+        <div className="max-w-3xl mx-auto px-4 pb-4">
+          <div className="flex gap-2 bg-[#1E293B]/95 backdrop-blur-lg p-2 rounded-3xl border border-slate-700 shadow-2xl">
+            <button
+              onClick={() => {
+                setViewMode("search");
+                setSavedSubView("list");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "search" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <Search size={18} className="mb-1" />
+              <span>Search</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("top");
+                setSavedSubView("list");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "top" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <Trophy size={18} className="mb-1" />
+              <span>Leaders</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("saved");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "saved" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <Bookmark size={18} className="mb-1" />
+              <span>Saved</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("metrics");
+                setSavedSubView("list");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "metrics" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <TrendingUp size={18} className="mb-1" />
+              <span>Data</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("map");
+                setSelectedEstablishment(null);
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "map" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <MapIcon size={18} className="mb-1" />
+              <span>Map</span>
+            </button>
+          </div>
+        </div>
+      </nav>
 
       {/* Small CSS helpers */}
       <style>{`
