@@ -174,6 +174,7 @@ export default function ProspectingApp() {
   const [customDayFilter, setCustomDayFilter] = useState(null); // 0-6 (Sunday-Saturday)
   const [customHourFilter, setCustomHourFilter] = useState(""); // 1-12
   const [customPeriodFilter, setCustomPeriodFilter] = useState("AM"); // AM or PM
+  const [customFilterActive, setCustomFilterActive] = useState(false); // Whether custom filter is running
 
   // Hours of operation
   const [businessHours, setBusinessHours] = useState(null);
@@ -1169,7 +1170,7 @@ export default function ProspectingApp() {
       }
       
       // If custom day/time filter is enabled, check if open at that time
-      if (customDayFilter !== null && customHourFilter) {
+      if (customFilterActive && customDayFilter !== null && customHourFilter) {
         const businessHours = parsed?.businessHours;
         console.log('Account:', row.name, 'Has hours?', !!businessHours, 'Has periods?', !!businessHours?.periods);
         if (!businessHours?.periods || !Array.isArray(businessHours.periods)) {
@@ -1200,11 +1201,31 @@ export default function ProspectingApp() {
         const isOpen = businessHours.periods.some(period => {
           const openDay = period.open?.day;
           const closeDay = period.close?.day;
-          const openTime = period.open?.time || '0000';
-          const closeTime = period.close?.time || '2359';
           
-          const openMinutes = parseInt(openTime.slice(0, 2)) * 60 + parseInt(openTime.slice(2));
-          const closeMinutes = parseInt(closeTime.slice(0, 2)) * 60 + parseInt(closeTime.slice(2));
+          // Google API can return either time string or hour/minute objects
+          let openTime, closeTime, openMinutes, closeMinutes;
+          
+          if (period.open?.time) {
+            openTime = period.open.time;
+            openMinutes = parseInt(openTime.slice(0, 2)) * 60 + parseInt(openTime.slice(2));
+          } else if (period.open?.hour !== undefined) {
+            openMinutes = (period.open.hour * 60) + (period.open.minute || 0);
+            openTime = String(period.open.hour).padStart(2, '0') + String(period.open.minute || 0).padStart(2, '0');
+          } else {
+            openTime = '0000';
+            openMinutes = 0;
+          }
+          
+          if (period.close?.time) {
+            closeTime = period.close.time;
+            closeMinutes = parseInt(closeTime.slice(0, 2)) * 60 + parseInt(closeTime.slice(2));
+          } else if (period.close?.hour !== undefined) {
+            closeMinutes = (period.close.hour * 60) + (period.close.minute || 0);
+            closeTime = String(period.close.hour).padStart(2, '0') + String(period.close.minute || 0).padStart(2, '0');
+          } else {
+            closeTime = '2359';
+            closeMinutes = 1439;
+          }
           
           console.log(`  Period: ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][openDay]} ${openTime}-${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][closeDay]} ${closeTime} (Open: ${openMinutes}min, Close: ${closeMinutes}min)`);
           
@@ -1593,7 +1614,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showOpenOnly, customDayFilter, customHourFilter, customPeriodFilter]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showOpenOnly, customFilterActive]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -2790,12 +2811,20 @@ export default function ProspectingApp() {
                                 <option value="PM">PM</option>
                               </select>
                             </div>
+                            <button
+                              onClick={() => setCustomFilterActive(true)}
+                              disabled={!customDayFilter || !customHourFilter}
+                              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[11px] font-black uppercase px-3 py-2 rounded-md transition-colors"
+                            >
+                              Run Filter
+                            </button>
                             {(customDayFilter !== null || customHourFilter) && (
                               <button
                                 onClick={() => {
                                   setCustomDayFilter(null);
                                   setCustomHourFilter('');
                                   setCustomPeriodFilter('AM');
+                                  setCustomFilterActive(false);
                                 }}
                                 className="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-black uppercase px-2 py-1 rounded-md"
                               >
