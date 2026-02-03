@@ -28,6 +28,7 @@ import {
   Trophy,
   Bookmark,
   TrendingUp,
+  MapPinned,
 } from "lucide-react";
 
 // Recharts components used for charts
@@ -151,6 +152,9 @@ export default function ProspectingApp() {
   const [routeError, setRouteError] = useState("");
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
+  const [showMiniRouteMap, setShowMiniRouteMap] = useState(false);
+  const miniMapRef = useRef(null);
+  const miniMapInstanceRef = useRef(null);
 
   // Map
   const mapRef = useRef(null);
@@ -774,6 +778,7 @@ export default function ProspectingApp() {
 
       const route = body;
       setCalculatedRoute(route);
+      setShowMiniRouteMap(true);
 
       // Reorder selectedForRoute based on optimized waypoint order
       if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
@@ -961,6 +966,101 @@ export default function ProspectingApp() {
       fetchSavedRoutes();
     }
   }, [viewMode]);
+
+  // Initialize background maps for saved routes
+  useEffect(() => {
+    if (viewMode !== "metrics" || savedRoutes.length === 0) return;
+
+    const initRouteMaps = async () => {
+      // Ensure Leaflet is loaded
+      if (!window.L) {
+        // Load Leaflet if not already loaded
+        if (!document.querySelector('link[href*="leaflet.css"]')) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+          document.head.appendChild(link);
+        }
+
+        if (!document.querySelector('script[src*="leaflet.js"]')) {
+          const script = document.createElement("script");
+          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+          document.head.appendChild(script);
+          
+          // Wait for Leaflet to load
+          await new Promise((resolve) => {
+            const checkInterval = setInterval(() => {
+              if (window.L) {
+                clearInterval(checkInterval);
+                resolve();
+              }
+            }, 100);
+          });
+        }
+      }
+
+      const L = window.L;
+      if (!L) return;
+
+      // Initialize map for each route
+      savedRoutes.forEach((route) => {
+        const routeData = typeof route.route_data === 'string' ? JSON.parse(route.route_data) : route.route_data;
+        const mapId = `route-map-${route.id}`;
+        const mapElement = document.getElementById(mapId);
+        
+        if (!mapElement || mapElement._leaflet_id) return; // Skip if already initialized
+
+        try {
+          const map = L.map(mapElement, {
+            zoomControl: false,
+            attributionControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            touchZoom: false,
+            boxZoom: false,
+            keyboard: false,
+          }).setView(TEXAS_CENTER, 10);
+
+          // Add tile layer
+          if (MAPBOX_KEY) {
+            L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+              tileSize: 512,
+              zoomOffset: -1,
+              maxZoom: 22,
+            }).addTo(map);
+          } else {
+            L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+              maxZoom: 19,
+            }).addTo(map);
+          }
+
+          // Draw route if available
+          if (routeData.polyline && routeData.polyline.length > 0) {
+            const routeLine = L.polyline(routeData.polyline, {
+              color: '#10b981',
+              weight: 3,
+              opacity: 0.9,
+            }).addTo(map);
+
+            // Fit bounds to show entire route
+            map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+          }
+
+          // Force map size recalculation
+          setTimeout(() => {
+            map.invalidateSize();
+          }, 100);
+        } catch (error) {
+          console.error('Error initializing route map:', error);
+        }
+      });
+    };
+
+    // Delay initialization to ensure DOM is ready
+    const timer = setTimeout(initRouteMaps, 100);
+    return () => clearTimeout(timer);
+  }, [viewMode, savedRoutes]);
 
   // ---------- Map setup ----------
 
@@ -1729,6 +1829,163 @@ export default function ProspectingApp() {
     }
   }, [selectedForRoute]);
 
+  // Initialize and update mini route map
+  useEffect(() => {
+    if (!showMiniRouteMap || !miniMapRef.current) {
+      // Clean up map when hiding
+      if (miniMapInstanceRef.current && !showMiniRouteMap) {
+        try {
+          miniMapInstanceRef.current.remove();
+          miniMapInstanceRef.current = null;
+        } catch (e) {
+          console.error('Error cleaning up mini map:', e);
+        }
+      }
+      return;
+    }
+
+    // Load Leaflet CSS and JS if not already loaded
+    const loadLeaflet = () => {
+      return new Promise((resolve) => {
+        if (window.L) {
+          resolve();
+          return;
+        }
+
+        // Check if already loading
+        if (document.querySelector('link[href*="leaflet.css"]') && document.querySelector('script[src*="leaflet.js"]')) {
+          const checkInterval = setInterval(() => {
+            if (window.L) {
+              clearInterval(checkInterval);
+              resolve();
+            }
+          }, 100);
+          return;
+        }
+
+        // Load CSS
+        if (!document.querySelector('link[href*="leaflet.css"]')) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+          document.head.appendChild(link);
+        }
+
+        // Load JS
+        if (!document.querySelector('script[src*="leaflet.js"]')) {
+          const script = document.createElement("script");
+          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+          script.onload = () => resolve();
+          document.head.appendChild(script);
+        }
+      });
+    };
+
+    const initMiniMap = async () => {
+      try {
+        // Ensure Leaflet is loaded
+        await loadLeaflet();
+        
+        const L = window.L;
+        if (!L) {
+          console.error('Leaflet failed to load');
+          return;
+        }
+
+        // Initialize mini map if not already done
+        if (!miniMapInstanceRef.current && miniMapRef.current) {
+          console.log('Initializing mini route map...');
+          miniMapInstanceRef.current = L.map(miniMapRef.current, {
+            zoomControl: true,
+            attributionControl: false,
+            dragging: true,
+            scrollWheelZoom: true,
+            doubleClickZoom: true,
+          }).setView(TEXAS_CENTER, 10);
+
+          // Add tile layer
+          if (MAPBOX_KEY) {
+            L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+              tileSize: 512,
+              zoomOffset: -1,
+              maxZoom: 22,
+            }).addTo(miniMapInstanceRef.current);
+          } else {
+            L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+              maxZoom: 19,
+            }).addTo(miniMapInstanceRef.current);
+          }
+
+          L.control.zoom({ position: "bottomright" }).addTo(miniMapInstanceRef.current);
+        }
+
+        if (!miniMapInstanceRef.current) {
+          console.error('Failed to create mini map instance');
+          return;
+        }
+
+        // Clear existing route layers
+        miniMapInstanceRef.current.eachLayer((layer) => {
+          if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+            miniMapInstanceRef.current.removeLayer(layer);
+          }
+        });
+
+        // Draw route if available
+        if (calculatedRoute?.polyline && calculatedRoute.polyline.length > 0) {
+          console.log('Drawing route with', calculatedRoute.polyline.length, 'points');
+          const routeLine = L.polyline(calculatedRoute.polyline, {
+            color: '#10b981',
+            weight: 4,
+            opacity: 0.8,
+          }).addTo(miniMapInstanceRef.current);
+
+          // Fit bounds to show entire route
+          const bounds = routeLine.getBounds();
+          miniMapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
+
+          // Add markers for each stop
+          selectedForRoute.forEach((id, index) => {
+            const account = savedAccounts.find(a => a.id === id);
+            if (account && account.lat && account.lng) {
+              const icon = L.divIcon({
+                className: 'custom-mini-marker',
+                html: `<div class="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500 text-white font-bold text-xs border-2 border-white shadow-lg">${index + 1}</div>`,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+              });
+              
+              L.marker([account.lat, account.lng], { icon }).addTo(miniMapInstanceRef.current);
+            }
+          });
+        } else {
+          console.log('No route polyline available');
+        }
+
+        // Force map to recalculate size multiple times to ensure rendering
+        setTimeout(() => {
+          if (miniMapInstanceRef.current) {
+            miniMapInstanceRef.current.invalidateSize();
+          }
+        }, 50);
+        setTimeout(() => {
+          if (miniMapInstanceRef.current) {
+            miniMapInstanceRef.current.invalidateSize();
+          }
+        }, 200);
+        setTimeout(() => {
+          if (miniMapInstanceRef.current) {
+            miniMapInstanceRef.current.invalidateSize();
+          }
+        }, 500);
+      } catch (error) {
+        console.error('Error initializing mini map:', error);
+      }
+    };
+
+    initMiniMap();
+  }, [showMiniRouteMap, calculatedRoute, selectedForRoute, savedAccounts]);
+
   // Fly map to user's current location (if available)
   const handleMyLocation = () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -2081,7 +2338,7 @@ export default function ProspectingApp() {
       return (
         <div
           key={itemKey}
-          className={`relative bg-[#0F172A] border ${isSelected ? 'border-emerald-500 bg-emerald-600/10' : 'border-slate-700'} rounded-3xl p-5 cursor-pointer transition-all hover:border-emerald-400`}
+          className={`relative bg-[#0F172A] border ${isSelected ? 'border-emerald-500 bg-emerald-600/10 shadow-refined-lg' : 'border-slate-700/50 shadow-refined'} rounded-3xl p-5 cursor-pointer transition-all duration-200 hover:border-emerald-400 hover:shadow-refined-lg hover:scale-[1.01]`}
           onClick={() => {
             setSelectedForRoute(prev => 
               prev.includes(data.id) 
@@ -2240,17 +2497,13 @@ export default function ProspectingApp() {
       {/* Header */}
       <header className="max-w-6xl mx-auto mb-10 flex justify-center items-center">
         <div className="flex items-center gap-4">
-          <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg shadow-indigo-600/20">
+          <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-3 rounded-2xl shadow-lg shadow-indigo-600/30">
             <Navigation className="text-white" size={28} />
           </div>
           <div>
-            <h1 className="text-4xl font-black text-white tracking-tighter uppercase italic leading-none">
-              Pocket Prospector
+            <h1 className="text-4xl text-white tracking-tighter uppercase italic leading-none">
+              <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] mt-1 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-              Live GIS Intelligence
-            </p>
           </div>
         </div>
       </header>
@@ -2301,7 +2554,7 @@ export default function ProspectingApp() {
 
             {/* Route Planning Panel */}
             {routePlanMode && viewMode === "saved" && (
-              <div className="bg-emerald-600/10 border border-emerald-500/20 rounded-3xl p-5 space-y-3">
+              <div className="bg-gradient-to-br from-emerald-600/15 to-emerald-600/5 border border-emerald-500/30 rounded-3xl p-5 space-y-3 shadow-refined-lg">
                 <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">
                   Route Planning: {selectedForRoute.length} Stop{selectedForRoute.length !== 1 ? 's' : ''} Selected
                 </div>
@@ -2309,7 +2562,7 @@ export default function ProspectingApp() {
                   <button
                     onClick={calculateRoute}
                     disabled={routeLoading}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg hover:scale-[1.02]"
                   >
                     {routeLoading ? 'Calculating...' : 'Calculate Route'}
                   </button>
@@ -2354,11 +2607,39 @@ export default function ProspectingApp() {
                               polyline: calculatedRoute.polyline,
                             };
                             
+                            // Extract cities from addresses to name the route
+                            const cities = new Set();
+                            selectedForRoute.forEach(id => {
+                              const account = savedAccounts.find(a => a.id === id);
+                              if (account?.address) {
+                                // Address format is typically: "Street, City, TX"
+                                const parts = account.address.split(',');
+                                if (parts.length >= 2) {
+                                  const city = parts[parts.length - 2].trim();
+                                  if (city && city !== 'TX') {
+                                    cities.add(city);
+                                  }
+                                }
+                              }
+                            });
+                            
+                            // Generate route name from cities
+                            let routeName;
+                            if (cities.size === 0) {
+                              routeName = `Route - ${today}`;
+                            } else if (cities.size === 1) {
+                              routeName = `${[...cities][0]} Route`;
+                            } else if (cities.size === 2) {
+                              routeName = `${[...cities].join(' & ')} Route`;
+                            } else {
+                              routeName = `${[...cities].slice(0, 2).join(' & ')} + ${cities.size - 2} More`;
+                            }
+                            
                             const response = await fetch('/api/saved-routes', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
-                                name: `Route - ${today}`,
+                                name: routeName,
                                 routeData,
                               }),
                             });
@@ -2373,7 +2654,7 @@ export default function ProspectingApp() {
                             alert('Error saving route');
                           }
                         }}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl"
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
                       >
                         Save Route
                       </button>
@@ -2385,7 +2666,7 @@ export default function ProspectingApp() {
                           }).join('/');
                           window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
                         }}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl"
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
                       >
                         Open in Maps
                       </button>
@@ -2800,7 +3081,7 @@ export default function ProspectingApp() {
                                 placeholder="Hour"
                                 value={customHourFilter}
                                 onChange={(e) => setCustomHourFilter(e.target.value)}
-                                className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold px-2 py-1.5 rounded-md"
+                                className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-base font-bold px-2 py-1.5 rounded-md"
                               />
                               <select
                                 value={customPeriodFilter}
@@ -2813,7 +3094,7 @@ export default function ProspectingApp() {
                             </div>
                             <button
                               onClick={() => setCustomFilterActive(true)}
-                              disabled={!customDayFilter || !customHourFilter}
+                              disabled={customDayFilter === null || !customHourFilter}
                               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[11px] font-black uppercase px-3 py-2 rounded-md transition-colors"
                             >
                               Run Filter
@@ -2900,12 +3181,12 @@ export default function ProspectingApp() {
               )}
 
               {/* Saved Routes Section */}
-              <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-2xl">
+              <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700/50 shadow-refined-lg">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Saved Routes</h2>
                   <button
                     onClick={fetchSavedRoutes}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all"
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all shadow-refined hover:shadow-refined-lg hover:scale-105"
                   >
                     Refresh
                   </button>
@@ -2919,77 +3200,114 @@ export default function ProspectingApp() {
                     <p className="text-sm">No saved routes yet. Create a route in the Saved tab to save it here.</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-3 max-h-[600px] overflow-y-auto custom-scroll pr-2">
                     {savedRoutes.map((route) => {
                       const routeData = typeof route.route_data === 'string' ? JSON.parse(route.route_data) : route.route_data;
+                      const mapId = `route-map-${route.id}`;
                       return (
-                        <div key={route.id} className="bg-slate-900/50 border border-slate-700 rounded-2xl p-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <h3 className="text-white font-bold text-sm mb-1">{route.name}</h3>
-                              <p className="text-slate-400 text-[10px] uppercase tracking-widest">
-                                {new Date(route.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            </div>
-                            <button
-                              onClick={async () => {
-                                if (confirm('Delete this route?')) {
-                                  try {
-                                    const response = await fetch(`/api/saved-routes?id=${route.id}`, { method: 'DELETE' });
-                                    if (response.ok) {
-                                      await fetchSavedRoutes();
+                        <div key={route.id} className="relative bg-slate-900/50 border border-slate-700/50 rounded-2xl overflow-hidden shadow-refined-lg hover:border-slate-600/50 transition-all duration-300">
+                          {/* Background Map */}
+                          <div 
+                            id={mapId}
+                            className="absolute inset-0"
+                            style={{ zIndex: 0 }}
+                          />
+                          
+                          {/* Content */}
+                          <div className="relative p-5 bg-gradient-to-r from-slate-900/90 via-slate-900/50 to-slate-900/90" style={{ zIndex: 2 }}>
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1">
+                                <h3 className="text-white font-bold text-sm mb-1">{route.name}</h3>
+                                <p className="text-slate-400 text-[10px] uppercase tracking-widest">
+                                  {new Date(route.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  if (confirm('Delete this route?')) {
+                                    try {
+                                      const response = await fetch(`/api/saved-routes?id=${route.id}`, { method: 'DELETE' });
+                                      if (response.ok) {
+                                        await fetchSavedRoutes();
+                                      }
+                                    } catch (error) {
+                                      console.error('Delete error:', error);
                                     }
-                                  } catch (error) {
-                                    console.error('Delete error:', error);
                                   }
-                                }
-                              }}
-                              className="text-slate-400 hover:text-red-400 text-sm transition-colors"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4 mb-3">
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Distance</div>
+                                }}
+                                className="text-slate-400 hover:text-red-400 text-sm transition-colors"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-4 mb-3">
                               <div className="text-emerald-400 font-bold text-sm">
                                 {(routeData.distance / 1609.34).toFixed(1)} mi
                               </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Duration</div>
+                              <div className="text-slate-500">•</div>
                               <div className="text-emerald-400 font-bold text-sm">
                                 {Math.round(routeData.duration / 60)} min
                               </div>
                             </div>
-                          </div>
-                          <div className="mb-3">
-                            <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Stops ({routeData.accounts.length})</div>
-                            <div className="space-y-1">
-                              {routeData.accounts.map((account, idx) => (
-                                <div key={idx} className="text-[11px] text-slate-300 flex items-center gap-2">
-                                  <span className="bg-indigo-600 rounded-full w-5 h-5 flex items-center justify-center text-white font-bold text-[9px]">
-                                    {idx + 1}
-                                  </span>
-                                  {account.name}
-                                </div>
-                              ))}
+                            <div className="mb-3">
+                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Stops ({routeData.accounts.length})</div>
+                              <div className="space-y-1">
+                                {routeData.accounts.map((account, idx) => (
+                                  <div key={idx} className="text-[11px] text-slate-300 flex items-center gap-2">
+                                    <span className="bg-indigo-600 rounded-full w-5 h-5 flex items-center justify-center text-white font-bold text-[9px]">
+                                      {idx + 1}
+                                    </span>
+                                    {account.name}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
+                            <button
+                              onClick={() => {
+                                const waypoints = routeData.accounts.map(a => `${a.lat},${a.lng}`).join('/');
+                                window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
+                              }}
+                              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl transition-all shadow-refined hover:shadow-refined-lg hover:scale-[1.02]"
+                            >
+                              Open in Google Maps
+                            </button>
                           </div>
-                          <button
-                            onClick={() => {
-                              const waypoints = routeData.accounts.map(a => `${a.lat},${a.lng}`).join('/');
-                              window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
-                            }}
-                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl transition-all"
-                          >
-                            Open in Google Maps
-                          </button>
                         </div>
                       );
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          ) : showMiniRouteMap && calculatedRoute ? (
+            <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-black uppercase text-emerald-400 tracking-widest">
+                  Route Preview
+                </div>
+                <button
+                  onClick={() => setShowMiniRouteMap(false)}
+                  className="text-slate-400 hover:text-white text-sm transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="relative w-full h-[calc(100vh-280px)] rounded-2xl overflow-hidden border-2 border-emerald-500/30">
+                <div ref={miniMapRef} className="w-full h-full" />
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-[10px]">
+                <div className="bg-emerald-600/10 border border-emerald-500/20 rounded-xl p-3">
+                  <div className="text-slate-400 uppercase tracking-widest mb-1">Distance</div>
+                  <div className="text-emerald-300 font-bold text-lg">
+                    {(calculatedRoute.distance / 1609.34).toFixed(1)} mi
+                  </div>
+                </div>
+                <div className="bg-emerald-600/10 border border-emerald-500/20 rounded-xl p-3">
+                  <div className="text-slate-400 uppercase tracking-widest mb-1">Est. Time</div>
+                  <div className="text-emerald-300 font-bold text-lg">
+                    {Math.round(calculatedRoute.duration / 60)} min
+                  </div>
+                </div>
               </div>
             </div>
           ) : selectedEstablishment ? (

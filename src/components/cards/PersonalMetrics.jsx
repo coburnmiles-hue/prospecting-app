@@ -99,6 +99,9 @@ export default function PersonalMetrics({ data, onActivityClick }) {
 
   // Count walk-ins for the selected date
   const walkInsCount = activities.filter(a => String(a.activity_type || '').toLowerCase() === 'walk-in').length;
+  
+  // Count touches (all non-walk-in activities)
+  const touchesCount = activities.filter(a => String(a.activity_type || '').toLowerCase() !== 'walk-in').length;
 
   const goToPreviousDay = () => {
     const newDate = new Date(selectedDate);
@@ -128,13 +131,11 @@ export default function PersonalMetrics({ data, onActivityClick }) {
           </div>
           <div className="flex items-center gap-2">
             <div className="px-3 py-1 bg-indigo-900/30 rounded-full border border-indigo-700/50 text-xs font-black text-indigo-300">
-              {activities.length} {activities.length === 1 ? 'Activity' : 'Activities'}
+              {touchesCount} {touchesCount === 1 ? 'Touch' : 'Touches'}
             </div>
-            {isToday && (
-              <div className="px-3 py-1 bg-emerald-900/30 rounded-full border border-emerald-700/50 text-xs font-black text-emerald-300">
-                {walkInsCount} {walkInsCount === 1 ? 'Walk-In' : 'Walk-Ins'}
-              </div>
-            )}
+            <div className="px-3 py-1 bg-emerald-900/30 rounded-full border border-emerald-700/50 text-xs font-black text-emerald-300">
+              {walkInsCount} {walkInsCount === 1 ? 'Walk-In' : 'Walk-Ins'}
+            </div>
           </div>
         </div>
 
