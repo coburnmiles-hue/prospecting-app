@@ -159,6 +159,8 @@ export default function ProspectingApp() {
   const userLocationLayerRef = useRef(null);
   const LABEL_ZOOM_THRESHOLD = 13;
   const [legendOpen, setLegendOpen] = useState(true);
+  const [gpvTiersOpen, setGpvTiersOpen] = useState(false);
+  const [hoursFilterOpen, setHoursFilterOpen] = useState(false);
   const [mapSearch, setMapSearch] = useState("");
   const [mapSearchSuggestions, setMapSearchSuggestions] = useState([]);
   const [showMapSuggestions, setShowMapSuggestions] = useState(false);
@@ -169,6 +171,9 @@ export default function ProspectingApp() {
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
   const [showOpenOnly, setShowOpenOnly] = useState(false);
+  const [customDayFilter, setCustomDayFilter] = useState(null); // 0-6 (Sunday-Saturday)
+  const [customHourFilter, setCustomHourFilter] = useState(""); // 1-12
+  const [customPeriodFilter, setCustomPeriodFilter] = useState("AM"); // AM or PM
 
   // Hours of operation
   const [businessHours, setBusinessHours] = useState(null);
@@ -1163,6 +1168,107 @@ export default function ProspectingApp() {
         console.log('Keeping (open):', row.name);
       }
       
+      // If custom day/time filter is enabled, check if open at that time
+      if (customDayFilter !== null && customHourFilter) {
+        const businessHours = parsed?.businessHours;
+        console.log('Account:', row.name, 'Has hours?', !!businessHours, 'Has periods?', !!businessHours?.periods);
+        if (!businessHours?.periods || !Array.isArray(businessHours.periods)) {
+          console.log('Filtering out (no hours data):', row.name);
+          return;
+        }
+        
+        // Convert hour + AM/PM to minutes for comparison
+        const hour = parseInt(customHourFilter);
+        let filterHours24 = hour;
+        if (customPeriodFilter === 'PM' && hour !== 12) {
+          filterHours24 = hour + 12;
+        } else if (customPeriodFilter === 'AM' && hour === 12) {
+          filterHours24 = 0;
+        }
+        const filterTimeInMinutes = filterHours24 * 60;
+        
+        console.log('Custom time filter check:', {
+          account: row.name,
+          filterDay: customDayFilter,
+          filterTime: `${customHourFilter} ${customPeriodFilter}`,
+          filterTimeInMinutes,
+          numPeriods: businessHours.periods.length,
+          periods: businessHours.periods
+        });
+        
+        // Check if any period covers the selected day and time
+        const isOpen = businessHours.periods.some(period => {
+          const openDay = period.open?.day;
+          const closeDay = period.close?.day;
+          const openTime = period.open?.time || '0000';
+          const closeTime = period.close?.time || '2359';
+          
+          const openMinutes = parseInt(openTime.slice(0, 2)) * 60 + parseInt(openTime.slice(2));
+          const closeMinutes = parseInt(closeTime.slice(0, 2)) * 60 + parseInt(closeTime.slice(2));
+          
+          console.log(`  Period: ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][openDay]} ${openTime}-${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][closeDay]} ${closeTime} (Open: ${openMinutes}min, Close: ${closeMinutes}min)`);
+          
+          // Skip periods that appear to be 24-hour placeholder data (0000-2359 on same day)
+          // These are often incorrect default values from Google when real hours aren't available
+          if (openDay === closeDay && openTime === '0000' && closeTime === '2359') {
+            console.log('    Skipping 24-hour placeholder period');
+            return false;
+          }
+          
+          // Case 1: Period opens and closes on the same day
+          if (openDay === closeDay) {
+            if (openDay !== customDayFilter) {
+              console.log('    Different day, skip');
+              return false;
+            }
+            // For same-day periods, check if filter time is within the range
+            // Note: closeMinutes should be exclusive (before close time, not at)
+            const result = filterTimeInMinutes >= openMinutes && filterTimeInMinutes <= closeMinutes;
+            console.log(`    Same-day check: ${filterTimeInMinutes} >= ${openMinutes} && ${filterTimeInMinutes} <= ${closeMinutes} = ${result}`);
+            return result;
+          }
+          
+          // Case 2: Period spans multiple days (overnight)
+          // Check if we're on the opening day after the opening time
+          if (openDay === customDayFilter && filterTimeInMinutes >= openMinutes) {
+            console.log('    On opening day after open time: TRUE');
+            return true;
+          }
+          
+          // Check if we're on the closing day before the closing time
+          if (closeDay === customDayFilter && filterTimeInMinutes < closeMinutes) {
+            console.log('    On closing day before close time: TRUE');
+            return true;
+          }
+          
+          // Check if we're on a day between open and close
+          // (for periods that span more than 2 days, though rare)
+          if (openDay < closeDay) {
+            // Normal week span (e.g., Monday to Wednesday)
+            if (customDayFilter > openDay && customDayFilter < closeDay) {
+              console.log('    Multi-day period - in between: TRUE');
+              return true;
+            }
+          } else {
+            // Week wrap (e.g., Saturday to Monday)
+            if (customDayFilter > openDay || customDayFilter < closeDay) {
+              console.log('    Week-wrap period - in between: TRUE');
+              return true;
+            }
+          }
+          
+          console.log('    No match');
+          return false;
+        });
+        
+        console.log('==> Final isOpen result:', isOpen, 'for', row.name);
+        if (!isOpen) {
+          console.log('Filtering out (closed at this time):', row.name);
+          return;
+        }
+        console.log('KEEPING (open at this time):', row.name);
+      }
+      
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
       const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
@@ -1487,7 +1593,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showOpenOnly]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showOpenOnly, customDayFilter, customHourFilter, customPeriodFilter]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -2532,61 +2638,76 @@ export default function ProspectingApp() {
                 </div>
               </div>
 
-              <div className="absolute top-24 right-6 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl">
+              <div className="absolute top-24 right-6 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl max-w-xs">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="font-black uppercase text-[10px] text-indigo-300">GPV Legend</div>
+                  <div className="font-black uppercase text-[10px] text-indigo-300">Map Filters</div>
                   <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
                     {legendOpen ? 'Hide' : 'Show'}
                   </button>
                 </div>
                 <div className={`flex flex-col gap-2 ${legendOpen ? '' : 'hidden'}`}>
-                  {GPV_TIERS.map((t) => {
-                    const isVisible = visibleTiers.has(t.id);
-                    return (
-                      <div 
-                        key={t.id} 
-                        className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
-                        onClick={() => {
-                          setVisibleTiers(prev => {
-                            const newSet = new Set(prev);
-                            if (newSet.has(t.id)) {
-                              newSet.delete(t.id);
-                            } else {
-                              newSet.add(t.id);
-                            }
-                            return newSet;
-                          });
-                        }}
-                      >
-                        <div style={{ 
-                          width: 14, 
-                          height: 14, 
-                          background: isVisible ? t.color : '#334155', 
-                          borderRadius: 6, 
-                          border: '2px solid #fff',
-                          opacity: isVisible ? 1 : 0.4
-                        }} />
-                        <div className="text-[11px] font-bold" style={{ opacity: isVisible ? 1 : 0.5 }}>{t.label}</div>
+                  
+                  {/* GPV Tiers Collapsible Section */}
+                  <div className="border-b border-slate-700 pb-2">
+                    <button
+                      onClick={() => setGpvTiersOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
+                    >
+                      <span className="text-[10px] font-black uppercase text-slate-300">GPV Tiers</span>
+                      <span className="text-[10px] text-slate-400">{gpvTiersOpen ? '−' : '+'}</span>
+                    </button>
+                    {gpvTiersOpen && (
+                      <div className="mt-2 space-y-1">
+                        {GPV_TIERS.map((t) => {
+                          const isVisible = visibleTiers.has(t.id);
+                          return (
+                            <div 
+                              key={t.id} 
+                              className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
+                              onClick={() => {
+                                setVisibleTiers(prev => {
+                                  const newSet = new Set(prev);
+                                  if (newSet.has(t.id)) {
+                                    newSet.delete(t.id);
+                                  } else {
+                                    newSet.add(t.id);
+                                  }
+                                  return newSet;
+                                });
+                              }}
+                            >
+                              <div style={{ 
+                                width: 14, 
+                                height: 14, 
+                                background: isVisible ? t.color : '#334155', 
+                                borderRadius: 6, 
+                                border: '2px solid #fff',
+                                opacity: isVisible ? 1 : 0.4
+                              }} />
+                              <div className="text-[11px] font-bold" style={{ opacity: isVisible ? 1 : 0.5 }}>{t.label}</div>
+                            </div>
+                          );
+                        })}
+                        <div
+                          className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
+                          onClick={() => setVisibleActiveAccounts(v => !v)}
+                        >
+                          <div style={{
+                            width: 14,
+                            height: 14,
+                            background: visibleActiveAccounts ? '#10b981' : '#334155',
+                            borderRadius: 6,
+                            border: '2px solid #fff',
+                            opacity: visibleActiveAccounts ? 1 : 0.4
+                          }} />
+                          <div className="text-[11px] font-bold" style={{ opacity: visibleActiveAccounts ? 1 : 0.5 }}>Active Account</div>
+                        </div>
                       </div>
-                    );
-                  })}
-                  <div
-                    className="flex items-center gap-3 cursor-pointer hover:bg-slate-800/50 px-2 py-1 rounded-lg transition-colors"
-                    onClick={() => setVisibleActiveAccounts(v => !v)}
-                  >
-                    <div style={{
-                      width: 14,
-                      height: 14,
-                      background: visibleActiveAccounts ? '#10b981' : '#334155',
-                      borderRadius: 6,
-                      border: '2px solid #fff',
-                      opacity: visibleActiveAccounts ? 1 : 0.4
-                    }} />
-                    <div className="text-[11px] font-bold" style={{ opacity: visibleActiveAccounts ? 1 : 0.5 }}>Active Account</div>
+                    )}
                   </div>
 
-                  {/* Buttons placed directly under the GPV legend (stacked) */}
-                  <div className="mt-3 flex flex-col gap-2">
+                  {/* Filter Buttons */}
+                  <div className="flex flex-col gap-2">
                     <button
                       onClick={() => setShowUnvisitedOnly(v => !v)}
                       title="Show unvisited accounts only"
@@ -2611,15 +2732,80 @@ export default function ProspectingApp() {
                       <span className="font-black">$</span>
                       <span>Active Only</span>
                     </button>
+                  </div>
 
+                  {/* Account Hours Collapsible Section */}
+                  <div className="border-t border-slate-700 pt-2">
                     <button
-                      onClick={() => setShowOpenOnly(v => !v)}
-                      title="Show only accounts that are currently open"
-                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showOpenOnly ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
-                      style={{ backdropFilter: 'blur(4px)' }}
+                      onClick={() => setHoursFilterOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
                     >
-                      <span>Open Now</span>
+                      <span className="text-[10px] font-black uppercase text-slate-300">Account Hours</span>
+                      <span className="text-[10px] text-slate-400">{hoursFilterOpen ? '−' : '+'}</span>
                     </button>
+                    {hoursFilterOpen && (
+                      <div className="mt-2 space-y-2">
+                        <button
+                          onClick={() => setShowOpenOnly(v => !v)}
+                          title="Show only accounts that are currently open"
+                          className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showOpenOnly ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                          style={{ backdropFilter: 'blur(4px)' }}
+                        >
+                          <span>Open Now</span>
+                        </button>
+
+                        <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+                          <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Custom Time Filter</div>
+                          <div className="space-y-2">
+                            <select
+                              value={customDayFilter ?? ''}
+                              onChange={(e) => setCustomDayFilter(e.target.value === '' ? null : Number(e.target.value))}
+                              className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold px-2 py-1.5 rounded-md"
+                            >
+                              <option value="">Select Day</option>
+                              <option value="0">Sunday</option>
+                              <option value="1">Monday</option>
+                              <option value="2">Tuesday</option>
+                              <option value="3">Wednesday</option>
+                              <option value="4">Thursday</option>
+                              <option value="5">Friday</option>
+                              <option value="6">Saturday</option>
+                            </select>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                min="1"
+                                max="12"
+                                placeholder="Hour"
+                                value={customHourFilter}
+                                onChange={(e) => setCustomHourFilter(e.target.value)}
+                                className="flex-1 bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold px-2 py-1.5 rounded-md"
+                              />
+                              <select
+                                value={customPeriodFilter}
+                                onChange={(e) => setCustomPeriodFilter(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold px-2 py-1.5 rounded-md"
+                              >
+                                <option value="AM">AM</option>
+                                <option value="PM">PM</option>
+                              </select>
+                            </div>
+                            {(customDayFilter !== null || customHourFilter) && (
+                              <button
+                                onClick={() => {
+                                  setCustomDayFilter(null);
+                                  setCustomHourFilter('');
+                                  setCustomPeriodFilter('AM');
+                                }}
+                                className="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-black uppercase px-2 py-1 rounded-md"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
