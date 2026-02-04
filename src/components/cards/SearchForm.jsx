@@ -20,6 +20,8 @@ export default function SearchForm({
         <div className="space-y-3">
           <SearchInput
             icon={Search}
+            id="business-search"
+            name="searchTerm"
             placeholder={isSearchMode ? "Business or Address..." : "City or Zip Code..."}
             value={searchTerm}
             onChange={onSearchChange}
@@ -28,6 +30,8 @@ export default function SearchForm({
           {isSearchMode && (
             <SearchInput
               icon={MapPin}
+              id="city-filter"
+              name="cityFilter"
               placeholder="City Filter..."
               value={cityFilter}
               onChange={onCityChange}

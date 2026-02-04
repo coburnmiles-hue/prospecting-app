@@ -19,6 +19,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Sparkles,
   ExternalLink,
   Loader2,
   Map as MapIcon,
@@ -28,7 +29,6 @@ import {
   Trophy,
   Bookmark,
   TrendingUp,
-  MapPinned,
 } from "lucide-react";
 
 // Recharts components used for charts
@@ -80,7 +80,7 @@ export default function ProspectingApp() {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
   const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
 
-  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics | map
+  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics | map | nro
   const [savedSubView, setSavedSubView] = useState("list"); // list | info
 
   // Custom hooks for data fetching
@@ -111,13 +111,20 @@ export default function ProspectingApp() {
     handleTopSearch,
   } = useTopLeaders();
 
+  // NRO Search (New Retail Opportunities)
+  const [nroCity, setNroCity] = useState("");
+  const [nroResults, setNroResults] = useState([]);
+  const [nroLoading, setNroLoading] = useState(false);
+  const [nroError, setNroError] = useState("");
+
   // Combine loading and error states for backward compatibility
   const [localLoading, setLoading] = useState(false);
-  const loading = searchLoading || topLoading || localLoading;
-  const error = searchError || topError;
+  const loading = searchLoading || topLoading || localLoading || nroLoading;
+  const error = searchError || topError || nroError;
   const setError = (err) => {
     setSearchError(err);
     setTopError(err);
+    setNroError(err);
   };
 
   const [savedSearchTerm, setSavedSearchTerm] = useState("");
@@ -174,6 +181,7 @@ export default function ProspectingApp() {
   const [visibleActiveAccounts, setVisibleActiveAccounts] = useState(true);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
+  const [showNroOnly, setShowNroOnly] = useState(false);
   const [showOpenOnly, setShowOpenOnly] = useState(false);
   const [customDayFilter, setCustomDayFilter] = useState(null); // 0-6 (Sunday-Saturday)
   const [customHourFilter, setCustomHourFilter] = useState(""); // 1-12
@@ -215,6 +223,86 @@ export default function ProspectingApp() {
     setSelectedEstablishment(null);
     setAiResponse("");
     await handleTopSearch(e);
+  };
+
+  // NRO Search handler - searches TABC License Information for new licenses
+  const handleNroSearch = async (e) => {
+    if (e) e.preventDefault();
+    if (!nroCity.trim()) return;
+
+    setNroLoading(true);
+    setNroError("");
+    setNroResults([]);
+
+    try {
+      // Calculate date 4 months ago
+      const fourMonthsAgo = new Date();
+      fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
+      const dateFilter = fourMonthsAgo.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+
+      // First, try a simple query to see what data exists
+      let testUrl = `https://data.texas.gov/resource/7hf9-qc9f.json?$limit=5`;
+      console.log('Test URL (getting sample data):', testUrl);
+      let testRes = await fetch(testUrl);
+      let testData = await testRes.json();
+      console.log('Sample records from dataset:', testData);
+      console.log('Sample record fields:', testData[0] ? Object.keys(testData[0]) : 'No data');
+      console.log('Sample cities:', testData.map(r => r.city));
+
+      // Now try with just city filter - use LIKE for partial matching
+      const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
+      const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
+      
+      // Use upper() function and LIKE for case-insensitive partial matching
+      const where = `upper(city) LIKE '%${nroCity.toUpperCase()}%' AND (${licenseFilter})`;
+      const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
+      
+      const url = `https://data.texas.gov/resource/7hf9-qc9f.json${query}`;
+      console.log('NRO Search URL (without date):', url);
+      
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('NRO Search error response:', errorText);
+        throw new Error(`NRO Search error (${res.status})`);
+      }
+      
+      const data = await res.json();
+      console.log('NRO Search results (all):', data.length, 'records found');
+      if (data.length > 0) {
+        console.log('First result:', data[0]);
+        console.log('Original issue date field:', data[0].original_issue_date);
+      }
+      
+      // Now filter by date in JavaScript since the API query isn't working
+      const filtered = data.filter(item => {
+        if (!item.original_issue_date) return false;
+        const issueDate = new Date(item.original_issue_date);
+        return issueDate > fourMonthsAgo;
+      });
+      
+      console.log('Filtered results (last 4 months):', filtered.length, 'records');
+      
+      // Transform the data to match our display format
+      const transformed = filtered.map((item) => ({
+        location_name: item.trade_name || "Unknown",
+        location_address: item.address || "",
+        location_city: item.city || "",
+        location_zip: item.zip || "",
+        license_type: item.license_type || "",
+        license_id: item.license_id || "",
+        original_issue_date: item.original_issue_date || "",
+        taxpayer_number: item.license_id || null, // Use license_id as identifier
+        location_number: "1", // Placeholder
+      }));
+
+      setNroResults(transformed);
+    } catch (err) {
+      console.error('NRO Search error:', err);
+      setNroError(err?.message || "Could not search NRO data.");
+    } finally {
+      setNroLoading(false);
+    }
   };
 
   // ---------- Select + load history ----------
@@ -345,9 +433,7 @@ export default function ProspectingApp() {
       if (Number.isFinite(info.lat) && Number.isFinite(info.lng)) {
         lat = info.lat;
         lng = info.lng;
-        console.log("Using coordinates from info:", lat, lng);
       } else {
-        console.log("Falling back to pseudo coordinates");
         const pseudo = pseudoLatLng(info.taxpayer_number || info.location_name || addr);
         lat = pseudo.lat;
         lng = pseudo.lng;
@@ -393,7 +479,9 @@ export default function ProspectingApp() {
           venueType: venueType, 
           venueTypeLocked: venueTypeLocked,
           aiResponse: aiResponse || "",
-          manual: !info.taxpayer_number // mark as manual if no taxpayer number
+          businessHours: businessHours || null, // Save hours of operation
+          manual: !info.taxpayer_number, // mark as manual if no taxpayer number
+          isNro: viewMode === "nro" // mark as NRO if saved from NRO search
         }),
       };
 
@@ -1247,8 +1335,14 @@ export default function ProspectingApp() {
       // If 'show only active' is enabled, skip any non-active pins
       if (showActiveOnly && !parsed?.activeAccount) return;
 
-      // Skip this pin if its tier is not visible
-      if (tier && !visibleTiers.has(tier)) return;
+      // If 'show NRO only' is enabled, only show NRO tier pins
+      if (showNroOnly) {
+        if (tier !== 'nro') return;
+      } else {
+        // Normal tier visibility filtering (only when NRO filter is off)
+        if (tier && !visibleTiers.has(tier)) return;
+      }
+      
       // If this is an Active Account pin and Active Account visibility is off, skip it
       if (parsed?.activeAccount && !visibleActiveAccounts) return;
       
@@ -1261,20 +1355,15 @@ export default function ProspectingApp() {
       // If 'show open only' is enabled, skip accounts that are closed
       if (showOpenOnly) {
         const businessHours = parsed?.businessHours;
-        console.log('Checking open status for:', row.name, { businessHours, openNow: businessHours?.openNow });
         if (!businessHours || businessHours.openNow !== true) {
-          console.log('Filtering out (not open):', row.name);
           return;
         }
-        console.log('Keeping (open):', row.name);
       }
       
       // If custom day/time filter is enabled, check if open at that time
       if (customFilterActive && customDayFilter !== null && customHourFilter) {
         const businessHours = parsed?.businessHours;
-        console.log('Account:', row.name, 'Has hours?', !!businessHours, 'Has periods?', !!businessHours?.periods);
         if (!businessHours?.periods || !Array.isArray(businessHours.periods)) {
-          console.log('Filtering out (no hours data):', row.name);
           return;
         }
         
@@ -1287,15 +1376,6 @@ export default function ProspectingApp() {
           filterHours24 = 0;
         }
         const filterTimeInMinutes = filterHours24 * 60;
-        
-        console.log('Custom time filter check:', {
-          account: row.name,
-          filterDay: customDayFilter,
-          filterTime: `${customHourFilter} ${customPeriodFilter}`,
-          filterTimeInMinutes,
-          numPeriods: businessHours.periods.length,
-          periods: businessHours.periods
-        });
         
         // Check if any period covers the selected day and time
         const isOpen = businessHours.periods.some(period => {
@@ -1327,38 +1407,30 @@ export default function ProspectingApp() {
             closeMinutes = 1439;
           }
           
-          console.log(`  Period: ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][openDay]} ${openTime}-${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][closeDay]} ${closeTime} (Open: ${openMinutes}min, Close: ${closeMinutes}min)`);
-          
           // Skip periods that appear to be 24-hour placeholder data (0000-2359 on same day)
           // These are often incorrect default values from Google when real hours aren't available
           if (openDay === closeDay && openTime === '0000' && closeTime === '2359') {
-            console.log('    Skipping 24-hour placeholder period');
             return false;
           }
           
           // Case 1: Period opens and closes on the same day
           if (openDay === closeDay) {
             if (openDay !== customDayFilter) {
-              console.log('    Different day, skip');
               return false;
             }
             // For same-day periods, check if filter time is within the range
             // Note: closeMinutes should be exclusive (before close time, not at)
-            const result = filterTimeInMinutes >= openMinutes && filterTimeInMinutes <= closeMinutes;
-            console.log(`    Same-day check: ${filterTimeInMinutes} >= ${openMinutes} && ${filterTimeInMinutes} <= ${closeMinutes} = ${result}`);
-            return result;
+            return filterTimeInMinutes >= openMinutes && filterTimeInMinutes <= closeMinutes;
           }
           
           // Case 2: Period spans multiple days (overnight)
           // Check if we're on the opening day after the opening time
           if (openDay === customDayFilter && filterTimeInMinutes >= openMinutes) {
-            console.log('    On opening day after open time: TRUE');
             return true;
           }
           
           // Check if we're on the closing day before the closing time
           if (closeDay === customDayFilter && filterTimeInMinutes < closeMinutes) {
-            console.log('    On closing day before close time: TRUE');
             return true;
           }
           
@@ -1367,27 +1439,21 @@ export default function ProspectingApp() {
           if (openDay < closeDay) {
             // Normal week span (e.g., Monday to Wednesday)
             if (customDayFilter > openDay && customDayFilter < closeDay) {
-              console.log('    Multi-day period - in between: TRUE');
               return true;
             }
           } else {
             // Week wrap (e.g., Saturday to Monday)
             if (customDayFilter > openDay || customDayFilter < closeDay) {
-              console.log('    Week-wrap period - in between: TRUE');
               return true;
             }
           }
           
-          console.log('    No match');
           return false;
         });
         
-        console.log('==> Final isOpen result:', isOpen, 'for', row.name);
         if (!isOpen) {
-          console.log('Filtering out (closed at this time):', row.name);
           return;
         }
-        console.log('KEEPING (open at this time):', row.name);
       }
       
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
@@ -1628,6 +1694,17 @@ export default function ProspectingApp() {
         return;
       }
 
+      // First check if we have cached hours in notes
+      try {
+        const notes = selectedEstablishment?.info?.notes || '';
+        const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
+        if (parsed?.businessHours) {
+          setBusinessHours(parsed.businessHours);
+          setHoursLoading(false);
+          return;
+        }
+      } catch {}
+
       const name = selectedEstablishment.info.location_name;
       const address = getFullAddress(selectedEstablishment.info);
       
@@ -1651,7 +1728,7 @@ export default function ProspectingApp() {
     };
 
     fetchHours();
-  }, [selectedEstablishment?.info?.id]);
+  }, [selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_name, selectedEstablishment?.info?.location_address]);
 
   const searchMapAccounts = (searchTerm) => {
     if (!searchTerm || !mapInstance.current) return;
@@ -1703,9 +1780,7 @@ export default function ProspectingApp() {
       try {
         const notes = selectedEstablishment?.info?.notes || '';
         const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
-        console.log('Checking for cached hours:', { hasNotes: !!notes, parsed, hasBizHours: !!parsed?.businessHours });
         if (parsed?.businessHours) {
-          console.log('Using cached hours:', parsed.businessHours);
           setBusinessHours(parsed.businessHours);
           setHoursLoading(false);
           return;
@@ -1786,7 +1861,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showOpenOnly, customFilterActive]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showNroOnly, showOpenOnly, customFilterActive]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -2289,6 +2364,43 @@ export default function ProspectingApp() {
             },
             history: parsed.history,
           });
+          
+          // Auto-update tier if currently NRO but now has sales data
+          if (parsed?.gpvTier === 'nro' && parsed.history.length > 0) {
+            const total = parsed.history.reduce((sum, h) => sum + h.total, 0);
+            const avg = total / parsed.history.length;
+            const annualForecast = avg * 12;
+            
+            // Only upgrade if there's significant sales (> $10k annual forecast)
+            if (annualForecast > 10000) {
+              let newTier = 'tier1';
+              if (annualForecast >= 1000000) newTier = 'tier6';
+              else if (annualForecast >= 500000) newTier = 'tier5';
+              else if (annualForecast >= 250000) newTier = 'tier4';
+              else if (annualForecast >= 100000) newTier = 'tier3';
+              else if (annualForecast >= 50000) newTier = 'tier2';
+              
+              // Update tier in database
+              const updatedNotes = {
+                ...parsed,
+                gpvTier: newTier
+              };
+              
+              fetch(`/api/accounts?id=${data.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ notes: JSON.stringify(updatedNotes) }),
+              }).then(() => refreshSavedAccounts()).catch(() => {});
+              
+              setSelectedGpvTier(newTier);
+            } else {
+              // Keep as NRO if sales are too low
+              setSelectedGpvTier('nro');
+            }
+          } else {
+            setSelectedGpvTier(parsed?.gpvTier || null);
+          }
+          
           // If the map is visible, zoom to the saved pin and open its popup
           if (savedSubView === 'map' && mapInstance.current) {
             try {
@@ -2607,6 +2719,40 @@ export default function ProspectingApp() {
                 }}
                 routePlanMode={routePlanMode}
               />
+            ) : viewMode === "nro" ? (
+              <div className="bg-gradient-to-br from-indigo-600/15 to-indigo-600/5 border border-indigo-500/30 rounded-3xl p-6 shadow-refined-lg">
+                <div className="text-[10px] font-black uppercase text-indigo-400 tracking-widest mb-4">
+                  New Retail Opportunities Search
+                </div>
+                <form onSubmit={handleNroSearch}>
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      id="nro-city-search"
+                      name="nroCity"
+                      placeholder="CITY (e.g., AUSTIN)"
+                      value={nroCity}
+                      onChange={(e) => setNroCity(e.target.value.toUpperCase())}
+                      className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
+                    <button
+                      type="submit"
+                      disabled={nroLoading || !nroCity.trim()}
+                      className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
+                    >
+                      {nroLoading ? 'Searching...' : 'Search New Licenses (Last 4 Months)'}
+                    </button>
+                    {nroError && (
+                      <div className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3">
+                        {nroError}
+                      </div>
+                    )}
+                  </div>
+                </form>
+                <div className="text-[9px] text-slate-400 mt-4 leading-relaxed">
+                  Searches Texas TABC License Information for new liquor licenses issued in the last 4 months. Perfect for finding brand new retail opportunities.
+                </div>
+              </div>
             ) : (
               <SearchForm
                 onSubmit={viewMode === "search" ? wrappedHandleSearch : wrappedHandleTopSearch}
@@ -2911,15 +3057,130 @@ export default function ProspectingApp() {
             )}
 
             <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
-              {listToRender.map(renderListItem)}
-              {listToRender.length === 0 && (
-                <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
-                  {viewMode === "saved"
-                    ? "No saved accounts yet."
-                    : viewMode === "top"
-                    ? "Run a city or zip ranking to see leaders."
-                    : "Search for a business or address to see results."}
-                </div>
+              {viewMode === "nro" ? (
+                nroResults.length > 0 ? (
+                  nroResults.map((item, idx) => (
+                    <div
+                      key={idx}
+                      onClick={async () => {
+                        // Search for sales data using business name and city to verify if truly new
+                        setLoading(true);
+                        try {
+                          // Try to find sales records by searching for the business name in the city
+                          const searchName = item.location_name.toUpperCase();
+                          const searchCity = item.location_city.toUpperCase();
+                          
+                          // Search the sales database by name and city
+                          const where = buildSocrataWhere(searchName, searchCity);
+                          const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
+                            `${DATE_FIELD} DESC`
+                          )}&$limit=12`;
+
+                          const res = await fetch(`${BASE_URL}${query}`);
+                          let history = [];
+                          
+                          if (res.ok) {
+                            const hist = await res.json();
+                            const rows = Array.isArray(hist) ? hist : [];
+                            
+                            // Only use results if we found an exact name match
+                            const exactMatch = rows.filter(row => 
+                              (row.location_name || '').toUpperCase() === searchName
+                            );
+                            
+                            if (exactMatch.length > 0) {
+                              const reversed = [...exactMatch].reverse();
+                              history = reversed.map((h) => ({
+                                month: monthLabelFromDate(h[DATE_FIELD]),
+                                liquor: Number(h.liquor_receipts || 0),
+                                beer: Number(h.beer_receipts || 0),
+                                wine: Number(h.wine_receipts || 0),
+                                total: Number(h[TOTAL_FIELD] || 0),
+                                rawDate: h[DATE_FIELD],
+                              }));
+                            }
+                          }
+                          
+                          setSelectedEstablishment({ 
+                            info: item, 
+                            history 
+                          });
+                          
+                          // Auto-select NRO tier for new opportunities, or calculate tier if sales exist
+                          if (history.length === 0) {
+                            // No sales data - set to NRO tier
+                            setSelectedGpvTier('nro');
+                          } else {
+                            // Has sales data - calculate appropriate tier based on forecast
+                            const total = history.reduce((sum, h) => sum + h.total, 0);
+                            const avg = total / history.length;
+                            const annualForecast = avg * 12;
+                            
+                            // Determine tier based on annual forecast
+                            let tier = 'tier1';
+                            if (annualForecast >= 1000000) tier = 'tier6';
+                            else if (annualForecast >= 500000) tier = 'tier5';
+                            else if (annualForecast >= 250000) tier = 'tier4';
+                            else if (annualForecast >= 100000) tier = 'tier3';
+                            else if (annualForecast >= 50000) tier = 'tier2';
+                            
+                            setSelectedGpvTier(tier);
+                          }
+                          
+                          // Fetch AI info for NRO account
+                          await fetchAiForInfo(item, { updateState: true });
+                        } catch (err) {
+                          // If search fails, just show with empty history and NRO tier
+                          setSelectedEstablishment({ 
+                            info: item, 
+                            history: [] 
+                          });
+                          setSelectedGpvTier('nro');
+                          
+                          // Still fetch AI info even on error
+                          try {
+                            await fetchAiForInfo(item, { updateState: true });
+                          } catch {}
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      className="bg-[#0F172A] border border-slate-700/50 shadow-refined rounded-3xl p-5 cursor-pointer transition-all duration-200 hover:border-indigo-500 hover:shadow-refined-lg hover:scale-[1.01]"
+                    >
+                      <div className="text-[11px] font-black uppercase text-white tracking-wider leading-tight">
+                        {item.location_name}
+                      </div>
+                      <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                        {item.location_address ? `${item.location_address}, ` : ''}{item.location_city}, TX {item.location_zip}
+                      </div>
+                      <div className="flex gap-3 mt-3">
+                        <div className="text-[9px] font-bold text-indigo-400">
+                          {item.license_type}
+                        </div>
+                        <div className="text-[9px] font-bold text-emerald-400">
+                          Issued: {new Date(item.original_issue_date).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
+                    Search for a city to find new retail opportunities.
+                  </div>
+                )
+              ) : (
+                <>
+                  {listToRender.map(renderListItem)}
+                  {listToRender.length === 0 && (
+                    <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
+                      {viewMode === "saved"
+                        ? "No saved accounts yet."
+                        : viewMode === "top"
+                        ? "Run a city or zip ranking to see leaders."
+                        : "Search for a business or address to see results."}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </aside>
@@ -3082,6 +3343,15 @@ export default function ProspectingApp() {
 
                   {/* Filter Buttons */}
                   <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => setShowNroOnly(v => !v)}
+                      title="Show NRO accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showNroOnly ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>NRO</span>
+                    </button>
+
                     <button
                       onClick={() => setShowUnvisitedOnly(v => !v)}
                       title="Show unvisited accounts only"
@@ -3467,11 +3737,27 @@ export default function ProspectingApp() {
                   </div>
 
                     <div className="flex items-center gap-3 shrink-0">
-                    <SaveButton
-                      onClick={toggleSaveAccount}
-                      isSaved={isSaved(selectedEstablishment.info)}
-                      disabled={aiLoading && !isSaved(selectedEstablishment.info)}
-                    />
+                    <div className="flex flex-col gap-2">
+                      <SaveButton
+                        onClick={toggleSaveAccount}
+                        isSaved={isSaved(selectedEstablishment.info)}
+                        disabled={aiLoading && !isSaved(selectedEstablishment.info)}
+                      />
+                      {viewMode === "nro" && (
+                        <button
+                          onClick={() => {
+                            // Always set to NRO tier when using NRO button
+                            setSelectedGpvTier('nro');
+                            // Use setTimeout to ensure state is updated before saving
+                            setTimeout(() => toggleSaveAccount(), 50);
+                          }}
+                          disabled={aiLoading && !isSaved(selectedEstablishment.info)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500 rounded-lg text-white text-[9px] font-black uppercase tracking-widest text-center transition-all"
+                        >
+                          NRO
+                        </button>
+                      )}
+                    </div>
 
                     <ForecastCard total={stats?.total || 0} />
                   </div>
@@ -3699,6 +3985,19 @@ export default function ProspectingApp() {
             >
               <TrendingUp size={18} className="mb-1" />
               <span>Data</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewMode("nro");
+                setSavedSubView("list");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "nro" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <Sparkles size={18} className="mb-1" />
+              <span>NRO</span>
             </button>
 
             <button

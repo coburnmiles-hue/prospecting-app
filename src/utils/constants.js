@@ -8,6 +8,7 @@ export const VENUE_TYPES = {
 };
 
 export const GPV_TIERS = [
+  { id: "nro", label: "NRO", color: "#06b6d4" }, // New Retail Opportunity - cyan
   { id: "tier1", label: "$0-50K", color: "#3b82f6" },
   { id: "tier2", label: "$50-100K", color: "#8b5cf6" },
   { id: "tier3", label: "$100-250K", color: "#ec4899" },
