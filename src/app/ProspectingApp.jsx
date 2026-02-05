@@ -113,6 +113,7 @@ export default function ProspectingApp() {
 
   // NRO Search (New Retail Opportunities)
   const [nroCity, setNroCity] = useState("");
+  const [nroCounty, setNroCounty] = useState("");
   const [nroResults, setNroResults] = useState([]);
   const [nroLoading, setNroLoading] = useState(false);
   const [nroError, setNroError] = useState("");
@@ -228,7 +229,7 @@ export default function ProspectingApp() {
   // NRO Search handler - searches TABC License Information for new licenses
   const handleNroSearch = async (e) => {
     if (e) e.preventDefault();
-    if (!nroCity.trim()) return;
+    if (!nroCity.trim() && !nroCounty.trim()) return;
 
     setNroLoading(true);
     setNroError("");
@@ -249,12 +250,21 @@ export default function ProspectingApp() {
       console.log('Sample record fields:', testData[0] ? Object.keys(testData[0]) : 'No data');
       console.log('Sample cities:', testData.map(r => r.city));
 
-      // Now try with just city filter - use LIKE for partial matching
+      // Now try with city and/or county filter - use LIKE for partial matching
       const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
       const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
       
-      // Use upper() function and LIKE for case-insensitive partial matching
-      const where = `upper(city) LIKE '%${nroCity.toUpperCase()}%' AND (${licenseFilter})`;
+      // Build location filter based on what's provided
+      let locationFilter = '';
+      if (nroCity.trim() && nroCounty.trim()) {
+        locationFilter = `upper(city) LIKE '%${nroCity.toUpperCase()}%' AND upper(county) LIKE '%${nroCounty.toUpperCase()}%'`;
+      } else if (nroCity.trim()) {
+        locationFilter = `upper(city) LIKE '%${nroCity.toUpperCase()}%'`;
+      } else if (nroCounty.trim()) {
+        locationFilter = `upper(county) LIKE '%${nroCounty.toUpperCase()}%'`;
+      }
+      
+      const where = `${locationFilter} AND (${licenseFilter})`;
       const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
       
       const url = `https://data.texas.gov/resource/7hf9-qc9f.json${query}`;
@@ -2735,9 +2745,18 @@ export default function ProspectingApp() {
                       onChange={(e) => setNroCity(e.target.value.toUpperCase())}
                       className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
                     />
+                    <input
+                      type="text"
+                      id="nro-county-search"
+                      name="nroCounty"
+                      placeholder="COUNTY (e.g., TRAVIS)"
+                      value={nroCounty}
+                      onChange={(e) => setNroCounty(e.target.value.toUpperCase())}
+                      className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
                     <button
                       type="submit"
-                      disabled={nroLoading || !nroCity.trim()}
+                      disabled={nroLoading || (!nroCity.trim() && !nroCounty.trim())}
                       className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
                     >
                       {nroLoading ? 'Searching...' : 'Search New Licenses (Last 4 Months)'}
@@ -2750,7 +2769,7 @@ export default function ProspectingApp() {
                   </div>
                 </form>
                 <div className="text-[9px] text-slate-400 mt-4 leading-relaxed">
-                  Searches Texas TABC License Information for new liquor licenses issued in the last 4 months. Perfect for finding brand new retail opportunities.
+                  Searches Texas TABC License Information for new liquor licenses issued in the last 4 months. Search by city, county, or both. Perfect for finding brand new retail opportunities.
                 </div>
               </div>
             ) : (
