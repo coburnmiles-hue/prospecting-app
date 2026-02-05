@@ -114,6 +114,7 @@ export default function ProspectingApp() {
   // NRO Search (New Retail Opportunities)
   const [nroCity, setNroCity] = useState("");
   const [nroCounty, setNroCounty] = useState("");
+  const [nroZip, setNroZip] = useState("");
   const [nroResults, setNroResults] = useState([]);
   const [nroLoading, setNroLoading] = useState(false);
   const [nroError, setNroError] = useState("");
@@ -132,6 +133,7 @@ export default function ProspectingApp() {
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
 
   const [venueType, setVenueType] = useState("casual_dining");
+  const [customFoodPct, setCustomFoodPct] = useState("");
 
   // AI
   const [aiLoading, setAiLoading] = useState(false);
@@ -229,7 +231,7 @@ export default function ProspectingApp() {
   // NRO Search handler - searches TABC License Information for new licenses
   const handleNroSearch = async (e) => {
     if (e) e.preventDefault();
-    if (!nroCity.trim() && !nroCounty.trim()) return;
+    if (!nroCity.trim() && !nroCounty.trim() && !nroZip.trim()) return;
 
     setNroLoading(true);
     setNroError("");
@@ -250,20 +252,23 @@ export default function ProspectingApp() {
       console.log('Sample record fields:', testData[0] ? Object.keys(testData[0]) : 'No data');
       console.log('Sample cities:', testData.map(r => r.city));
 
-      // Now try with city and/or county filter - use LIKE for partial matching
+      // Now try with city and/or county and/or zip filter - use LIKE for partial matching
       const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
       const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
       
       // Build location filter based on what's provided
-      let locationFilter = '';
-      if (nroCity.trim() && nroCounty.trim()) {
-        locationFilter = `upper(city) LIKE '%${nroCity.toUpperCase()}%' AND upper(county) LIKE '%${nroCounty.toUpperCase()}%'`;
-      } else if (nroCity.trim()) {
-        locationFilter = `upper(city) LIKE '%${nroCity.toUpperCase()}%'`;
-      } else if (nroCounty.trim()) {
-        locationFilter = `upper(county) LIKE '%${nroCounty.toUpperCase()}%'`;
+      const filters = [];
+      if (nroCity.trim()) {
+        filters.push(`upper(city) LIKE '%${nroCity.toUpperCase()}%'`);
+      }
+      if (nroCounty.trim()) {
+        filters.push(`upper(county) LIKE '%${nroCounty.toUpperCase()}%'`);
+      }
+      if (nroZip.trim()) {
+        filters.push(`zip LIKE '${nroZip}%'`);
       }
       
+      const locationFilter = filters.join(' AND ');
       const where = `${locationFilter} AND (${licenseFilter})`;
       const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
       
@@ -2197,13 +2202,21 @@ export default function ProspectingApp() {
     const filtered = h.filter((m) => m.total > 0);
     const avgAlc = filtered.length > 0 ? (filtered.reduce((sum, m) => sum + m.total, 0) / filtered.length) : 0;
     const cfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
-    let estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
-    // For fine dining, multiply food portion by 1.75
-    if (venueType === 'fine_dining') {
-      estFood = estFood * 1.75;
+    
+    let estFood;
+    if (venueType === 'custom' && customFoodPct) {
+      // Use custom food sales amount directly
+      estFood = parseFloat(customFoodPct) || 0;
+    } else {
+      estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
+      // For fine dining, multiply food portion by 1.75
+      if (venueType === 'fine_dining') {
+        estFood = estFood * 1.75;
+      }
     }
+    
     return { avgAlc, estFood, total: avgAlc + estFood, cfg };
-  }, [selectedEstablishment, venueType]);
+  }, [selectedEstablishment, venueType, customFoodPct]);
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -2754,9 +2767,18 @@ export default function ProspectingApp() {
                       onChange={(e) => setNroCounty(e.target.value.toUpperCase())}
                       className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
                     />
+                    <input
+                      type="text"
+                      id="nro-zip-search"
+                      name="nroZip"
+                      placeholder="ZIP CODE (e.g., 78701)"
+                      value={nroZip}
+                      onChange={(e) => setNroZip(e.target.value)}
+                      className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
                     <button
                       type="submit"
-                      disabled={nroLoading || (!nroCity.trim() && !nroCounty.trim())}
+                      disabled={nroLoading || (!nroCity.trim() && !nroCounty.trim() && !nroZip.trim())}
                       className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
                     >
                       {nroLoading ? 'Searching...' : 'Search New Licenses (Last 4 Months)'}
@@ -2769,7 +2791,7 @@ export default function ProspectingApp() {
                   </div>
                 </form>
                 <div className="text-[9px] text-slate-400 mt-4 leading-relaxed">
-                  Searches Texas TABC License Information for new liquor licenses issued in the last 4 months. Search by city, county, or both. Perfect for finding brand new retail opportunities.
+                  Searches Texas TABC License Information for new liquor licenses issued in the last 4 months. Search by city, county, zip code, or any combination. Perfect for finding brand new retail opportunities.
                 </div>
               </div>
             ) : (
@@ -3867,6 +3889,8 @@ export default function ProspectingApp() {
                   isLocked={venueTypeLocked}
                   onToggleLock={() => setVenueTypeLocked(!venueTypeLocked)}
                   isSaved={!!selectedEstablishment?.info?.id}
+                  customFoodPct={customFoodPct}
+                  onCustomFoodPctChange={(e) => setCustomFoodPct(e.target.value)}
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">

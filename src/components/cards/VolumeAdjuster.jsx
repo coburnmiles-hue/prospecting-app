@@ -1,7 +1,7 @@
 import { Utensils, Percent, Lock, Unlock } from "lucide-react";
 import { formatCurrency } from "../../utils/formatters";
 
-export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved }) {
+export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved, customFoodPct, onCustomFoodPctChange }) {
   return (
     <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 flex flex-col">
       <div className="flex items-center justify-between mb-6">
@@ -47,21 +47,36 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
         )}
       </div>
 
+      {venueType === 'custom' && (
+        <div className="mb-6">
+          <label className="block text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2">
+            Monthly Food Sales ($)
+          </label>
+          <input
+            type="number"
+            value={customFoodPct}
+            onChange={onCustomFoodPctChange}
+            placeholder="Enter monthly food sales amount"
+            className="w-full bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[12px] font-bold text-white placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+          />
+        </div>
+      )}
+
       <div className="bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800 mt-auto">
         <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">
-          Est. Food Revenue
+          Est. Food Revenue {stats?.isOverride && '(Override Active)'}
         </p>
         <p className="text-xl font-black text-white italic tracking-tighter">
-          {formatCurrency(stats?.estFood || 0)}
+          {stats?.isOverride ? '—' : formatCurrency(stats?.estFood || 0)}
         </p>
       </div>
 
       <div className="mt-6 bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800">
         <p className="text-[9px] font-black text-emerald-300 uppercase tracking-widest mb-1">
-          Est. Alcohol Revenue
+          Est. Alcohol Revenue {stats?.isOverride && '(Override Active)'}
         </p>
         <p className="text-xl font-black text-white italic tracking-tighter">
-          {formatCurrency(stats?.avgAlc || 0)}
+          {stats?.isOverride ? '—' : formatCurrency(stats?.avgAlc || 0)}
         </p>
       </div>
     </div>

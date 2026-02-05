@@ -5,6 +5,7 @@ export const VENUE_TYPES = {
   sports_bar: { label: "Sports Bar", alcoholPct: 0.55, foodPct: 0.45, desc: "45% Food / 55% Alcohol" },
   dive_bar: { label: "Dive Bar / Tavern", alcoholPct: 0.90, foodPct: 0.10, desc: "10% Food / 90% Alcohol" },
   no_food: { label: "No Food", alcoholPct: 1.0, foodPct: 0.0, desc: "0% Food / 100% Alcohol" },
+  custom: { label: "Custom", alcoholPct: 0.75, foodPct: 0.25, desc: "Custom Food Sales" },
 };
 
 export const GPV_TIERS = [
