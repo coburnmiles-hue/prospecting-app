@@ -112,9 +112,8 @@ export default function ProspectingApp() {
   } = useTopLeaders();
 
   // NRO Search (New Retail Opportunities)
-  const [nroCity, setNroCity] = useState("");
-  const [nroCounty, setNroCounty] = useState("");
-  const [nroZip, setNroZip] = useState("");
+  const [nroSearchTerm, setNroSearchTerm] = useState("");
+  const [nroSearchType, setNroSearchType] = useState("city"); // city, county, or zip
   const [nroResults, setNroResults] = useState([]);
   const [nroLoading, setNroLoading] = useState(false);
   const [nroError, setNroError] = useState("");
@@ -231,7 +230,7 @@ export default function ProspectingApp() {
   // NRO Search handler - searches TABC License Information for new licenses
   const handleNroSearch = async (e) => {
     if (e) e.preventDefault();
-    if (!nroCity.trim() && !nroCounty.trim() && !nroZip.trim()) return;
+    if (!nroSearchTerm.trim()) return;
 
     setNroLoading(true);
     setNroError("");
@@ -252,23 +251,20 @@ export default function ProspectingApp() {
       console.log('Sample record fields:', testData[0] ? Object.keys(testData[0]) : 'No data');
       console.log('Sample cities:', testData.map(r => r.city));
 
-      // Now try with city and/or county and/or zip filter - use LIKE for partial matching
+      // Now try with selected search type - use LIKE for partial matching
       const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
       const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
       
-      // Build location filter based on what's provided
-      const filters = [];
-      if (nroCity.trim()) {
-        filters.push(`upper(city) LIKE '%${nroCity.toUpperCase()}%'`);
-      }
-      if (nroCounty.trim()) {
-        filters.push(`upper(county) LIKE '%${nroCounty.toUpperCase()}%'`);
-      }
-      if (nroZip.trim()) {
-        filters.push(`zip LIKE '${nroZip}%'`);
+      // Build location filter based on selected search type
+      let locationFilter = '';
+      if (nroSearchType === 'city') {
+        locationFilter = `upper(city) LIKE '%${nroSearchTerm.toUpperCase()}%'`;
+      } else if (nroSearchType === 'county') {
+        locationFilter = `upper(county) LIKE '%${nroSearchTerm.toUpperCase()}%'`;
+      } else if (nroSearchType === 'zip') {
+        locationFilter = `zip LIKE '${nroSearchTerm}%'`;
       }
       
-      const locationFilter = filters.join(' AND ');
       const where = `${locationFilter} AND (${licenseFilter})`;
       const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
       
@@ -2749,36 +2745,33 @@ export default function ProspectingApp() {
                 </div>
                 <form onSubmit={handleNroSearch}>
                   <div className="space-y-3">
-                    <input
-                      type="text"
-                      id="nro-city-search"
-                      name="nroCity"
-                      placeholder="CITY (e.g., AUSTIN)"
-                      value={nroCity}
-                      onChange={(e) => setNroCity(e.target.value.toUpperCase())}
-                      className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
-                    />
-                    <input
-                      type="text"
-                      id="nro-county-search"
-                      name="nroCounty"
-                      placeholder="COUNTY (e.g., TRAVIS)"
-                      value={nroCounty}
-                      onChange={(e) => setNroCounty(e.target.value.toUpperCase())}
-                      className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
-                    />
-                    <input
-                      type="text"
-                      id="nro-zip-search"
-                      name="nroZip"
-                      placeholder="ZIP CODE (e.g., 78701)"
-                      value={nroZip}
-                      onChange={(e) => setNroZip(e.target.value)}
-                      className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
-                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={nroSearchType}
+                        onChange={(e) => setNroSearchType(e.target.value)}
+                        className="bg-[#0F172A] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold text-slate-200 focus:border-indigo-500 focus:outline-none transition-colors uppercase cursor-pointer"
+                      >
+                        <option value="city">City</option>
+                        <option value="county">County</option>
+                        <option value="zip">Zip Code</option>
+                      </select>
+                      <input
+                        type="text"
+                        id="nro-search"
+                        name="nroSearch"
+                        placeholder={
+                          nroSearchType === 'city' ? 'CITY (e.g., AUSTIN)' :
+                          nroSearchType === 'county' ? 'COUNTY (e.g., TRAVIS)' :
+                          'ZIP CODE (e.g., 78701)'
+                        }
+                        value={nroSearchTerm}
+                        onChange={(e) => setNroSearchTerm(nroSearchType === 'zip' ? e.target.value : e.target.value.toUpperCase())}
+                        className="flex-1 bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+                      />
+                    </div>
                     <button
                       type="submit"
-                      disabled={nroLoading || (!nroCity.trim() && !nroCounty.trim() && !nroZip.trim())}
+                      disabled={nroLoading || !nroSearchTerm.trim()}
                       className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
                     >
                       {nroLoading ? 'Searching...' : 'Search New Licenses (Last 4 Months)'}
@@ -2790,9 +2783,6 @@ export default function ProspectingApp() {
                     )}
                   </div>
                 </form>
-                <div className="text-[9px] text-slate-400 mt-4 leading-relaxed">
-                  Searches Texas TABC License Information for new liquor licenses issued in the last 4 months. Search by city, county, zip code, or any combination. Perfect for finding brand new retail opportunities.
-                </div>
               </div>
             ) : (
               <SearchForm

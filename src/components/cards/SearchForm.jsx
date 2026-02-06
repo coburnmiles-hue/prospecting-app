@@ -32,7 +32,7 @@ export default function SearchForm({
               icon={MapPin}
               id="city-filter"
               name="cityFilter"
-              placeholder="City Filter..."
+              placeholder="City Filter (Optional)..."
               value={cityFilter}
               onChange={onCityChange}
             />
