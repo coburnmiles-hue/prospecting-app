@@ -243,15 +243,6 @@ export default function ProspectingApp() {
       fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
       const dateFilter = fourMonthsAgo.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-      // First, try a simple query to see what data exists
-      let testUrl = `https://data.texas.gov/resource/7hf9-qc9f.json?$limit=5`;
-      console.log('Test URL (getting sample data):', testUrl);
-      let testRes = await fetch(testUrl);
-      let testData = await testRes.json();
-      console.log('Sample records from dataset:', testData);
-      console.log('Sample record fields:', testData[0] ? Object.keys(testData[0]) : 'No data');
-      console.log('Sample cities:', testData.map(r => r.city));
-
       // Now try with selected search type - use LIKE for partial matching
       const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
       const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
@@ -270,7 +261,6 @@ export default function ProspectingApp() {
       const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
       
       const url = `https://data.texas.gov/resource/7hf9-qc9f.json${query}`;
-      console.log('NRO Search URL (without date):', url);
       
       const res = await fetch(url);
       if (!res.ok) {
@@ -280,11 +270,6 @@ export default function ProspectingApp() {
       }
       
       const data = await res.json();
-      console.log('NRO Search results (all):', data.length, 'records found');
-      if (data.length > 0) {
-        console.log('First result:', data[0]);
-        console.log('Original issue date field:', data[0].original_issue_date);
-      }
       
       // Now filter by date in JavaScript since the API query isn't working
       const filtered = data.filter(item => {
@@ -292,8 +277,6 @@ export default function ProspectingApp() {
         const issueDate = new Date(item.original_issue_date);
         return issueDate > fourMonthsAgo;
       });
-      
-      console.log('Filtered results (last 4 months):', filtered.length, 'records');
       
       // Transform the data to match our display format and check for sales data
       const transformedPromises = filtered.map(async (item) => {
@@ -1871,7 +1854,6 @@ export default function ProspectingApp() {
                 businessHours: data.hours
               };
               
-              console.log('Saving hours to database:', updatedNotes);
               const saveResponse = await fetch(`/api/accounts?id=${selectedEstablishment.info.id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
@@ -1879,7 +1861,6 @@ export default function ProspectingApp() {
               });
               
               if (saveResponse.ok) {
-                console.log('Hours saved successfully');
                 // Refresh saved accounts to get the updated notes
                 await refreshSavedAccounts();
                 
