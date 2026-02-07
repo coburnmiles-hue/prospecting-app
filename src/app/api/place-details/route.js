@@ -22,7 +22,7 @@ export async function GET(req) {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.regularOpeningHours,places.currentOpeningHours'
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.regularOpeningHours,places.currentOpeningHours,places.websiteUri'
       },
       body: JSON.stringify({
         textQuery: searchQuery,
@@ -56,7 +56,10 @@ export async function GET(req) {
       periods: hours.periods || []
     };
 
-    return Response.json({ hours: formattedHours }, { status: 200 });
+    return Response.json({ 
+      hours: formattedHours, 
+      website: place.websiteUri || null 
+    }, { status: 200 });
   } catch (err) {
     console.error('Place details API error:', err);
     return Response.json({ error: 'Failed to fetch place details' }, { status: 500 });

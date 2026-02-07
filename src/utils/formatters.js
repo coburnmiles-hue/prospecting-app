@@ -53,11 +53,12 @@ export function parseSavedNotes(raw) {
       venueTypeLocked: p?.venueTypeLocked ?? false,
       aiResponse: p?.aiResponse || "",
       businessHours: p?.businessHours || null,
+      businessWebsite: p?.businessWebsite || null,
       raw: p,
     };
   } catch (e) {
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, activeAccount: false, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, raw: s };
+    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, activeAccount: false, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
   }
 }
 

@@ -192,6 +192,7 @@ export default function ProspectingApp() {
 
   // Hours of operation
   const [businessHours, setBusinessHours] = useState(null);
+  const [businessWebsite, setBusinessWebsite] = useState(null);
   const [hoursLoading, setHoursLoading] = useState(false);
 
   // Coordinate editor state
@@ -294,20 +295,57 @@ export default function ProspectingApp() {
       
       console.log('Filtered results (last 4 months):', filtered.length, 'records');
       
-      // Transform the data to match our display format
-      const transformed = filtered.map((item) => ({
-        location_name: item.trade_name || "Unknown",
-        location_address: item.address || "",
-        location_city: item.city || "",
-        location_zip: item.zip || "",
-        license_type: item.license_type || "",
-        license_id: item.license_id || "",
-        original_issue_date: item.original_issue_date || "",
-        taxpayer_number: item.license_id || null, // Use license_id as identifier
-        location_number: "1", // Placeholder
-      }));
+      // Transform the data to match our display format and check for sales data
+      const transformedPromises = filtered.map(async (item) => {
+        const transformed = {
+          location_name: item.trade_name || "Unknown",
+          location_address: item.address || "",
+          location_city: item.city || "",
+          location_zip: item.zip || "",
+          license_type: item.license_type || "",
+          license_id: item.license_id || "",
+          original_issue_date: item.original_issue_date || "",
+          taxpayer_number: item.license_id || null, // Use license_id as identifier
+          location_number: "1", // Placeholder
+          has_sales: false,
+          total_receipts: 0,
+        };
 
-      setNroResults(transformed);
+        // Check for sales data
+        try {
+          const searchName = (item.trade_name || "").toUpperCase();
+          const searchCity = (item.city || "").toUpperCase();
+          
+          if (searchName && searchCity) {
+            const where = buildSocrataWhere(searchName, searchCity);
+            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
+              `${DATE_FIELD} DESC`
+            )}&$limit=12`;
+
+            const salesRes = await fetch(`${BASE_URL}${query}`);
+            if (salesRes.ok) {
+              const salesData = await salesRes.json();
+              const exactMatch = salesData.filter(row => 
+                (row.location_name || '').toUpperCase() === searchName
+              );
+              
+              if (exactMatch.length > 0) {
+                transformed.has_sales = true;
+                // Calculate total from most recent record
+                const recent = exactMatch[0];
+                transformed.total_receipts = Number(recent.total_receipts || 0);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error checking sales for', item.trade_name, err);
+        }
+
+        return transformed;
+      });
+
+      const transformedWithSales = await Promise.all(transformedPromises);
+      setNroResults(transformedWithSales);
     } catch (err) {
       console.error('NRO Search error:', err);
       setNroError(err?.message || "Could not search NRO data.");
@@ -491,6 +529,7 @@ export default function ProspectingApp() {
           venueTypeLocked: venueTypeLocked,
           aiResponse: aiResponse || "",
           businessHours: businessHours || null, // Save hours of operation
+          businessWebsite: businessWebsite || null, // Save website
           manual: !info.taxpayer_number, // mark as manual if no taxpayer number
           isNro: viewMode === "nro" // mark as NRO if saved from NRO search
         }),
@@ -1711,6 +1750,7 @@ export default function ProspectingApp() {
         const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
         if (parsed?.businessHours) {
           setBusinessHours(parsed.businessHours);
+          setBusinessWebsite(parsed.businessWebsite || null);
           setHoursLoading(false);
           return;
         }
@@ -1727,12 +1767,15 @@ export default function ProspectingApp() {
         if (response.ok) {
           const data = await response.json();
           setBusinessHours(data.hours);
+          setBusinessWebsite(data.website || null);
         } else {
           setBusinessHours(null);
+          setBusinessWebsite(null);
         }
       } catch (error) {
         console.error('Failed to fetch hours:', error);
         setBusinessHours(null);
+        setBusinessWebsite(null);
       } finally {
         setHoursLoading(false);
       }
@@ -3178,18 +3221,33 @@ export default function ProspectingApp() {
                       }}
                       className="bg-[#0F172A] border border-slate-700/50 shadow-refined rounded-3xl p-5 cursor-pointer transition-all duration-200 hover:border-indigo-500 hover:shadow-refined-lg hover:scale-[1.01]"
                     >
-                      <div className="text-[11px] font-black uppercase text-white tracking-wider leading-tight">
-                        {item.location_name}
-                      </div>
-                      <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-                        {item.location_address ? `${item.location_address}, ` : ''}{item.location_city}, TX {item.location_zip}
-                      </div>
-                      <div className="flex gap-3 mt-3">
-                        <div className="text-[9px] font-bold text-indigo-400">
-                          {item.license_type}
-                        </div>
-                        <div className="text-[9px] font-bold text-emerald-400">
-                          Issued: {new Date(item.original_issue_date).toLocaleDateString()}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="text-[11px] font-black uppercase text-white tracking-wider leading-tight">
+                              {item.location_name}
+                            </div>
+                            {item.has_sales ? (
+                              <span className="text-emerald-400 font-black text-xs px-2 py-0.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30 whitespace-nowrap">
+                                {formatCurrency(item.total_receipts)}
+                              </span>
+                            ) : (
+                              <span className="text-cyan-400 font-black text-xs px-2 py-0.5 bg-cyan-500/10 rounded-lg border border-cyan-500/30 whitespace-nowrap">
+                                No Sales
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                            {item.location_address ? `${item.location_address}, ` : ''}{item.location_city}, TX {item.location_zip}
+                          </div>
+                          <div className="flex gap-3 mt-3">
+                            <div className="text-[9px] font-bold text-indigo-400">
+                              {item.license_type}
+                            </div>
+                            <div className="text-[9px] font-bold text-slate-400">
+                              Issued: {new Date(item.original_issue_date).toLocaleDateString()}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -3731,6 +3789,23 @@ export default function ProspectingApp() {
                         <ExternalLink size={14} /> Navigate Now
                       </a>
                     </div>
+
+                    {/* Website */}
+                    {businessWebsite && (
+                      <div className="mt-4">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                          Website
+                        </div>
+                        <a
+                          href={businessWebsite}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium underline break-all"
+                        >
+                          {businessWebsite.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                        </a>
+                      </div>
+                    )}
 
                     {/* Hours of Operation */}
                     {hoursLoading ? (
