@@ -1350,7 +1350,7 @@ export default function ProspectingApp() {
         // ignore
       }
 
-      updateMarkers();
+      updateMarkers(true); // Fit bounds on initial load
     };
 
     document.head.appendChild(script);
@@ -1368,7 +1368,7 @@ export default function ProspectingApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
-  const updateMarkers = () => {
+  const updateMarkers = (shouldFitBounds = false) => {
     if (!mapInstance.current || !window.L) return;
     const L = window.L;
 
@@ -1563,7 +1563,7 @@ export default function ProspectingApp() {
         coordsOffset.set(coordKey, offsetIndex + 1);
         // Apply small offset in a circular pattern
         const angle = (offsetIndex * 2 * Math.PI) / coordsCount.get(coordKey);
-        const offsetDistance = 0.0008; // approximately 80 meters for better separation
+        const offsetDistance = 0.0015; // approximately 150 meters for better separation
         markerLat += offsetDistance * Math.sin(angle);
         markerLng += offsetDistance * Math.cos(angle);
       }
@@ -1728,10 +1728,12 @@ export default function ProspectingApp() {
     });
 
     if (pins.length > 0 && bounds && typeof bounds.isValid === 'function' && bounds.isValid()) {
-      try {
-        mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
-      } catch (e) {
-        console.warn('fitBounds skipped due to invalid bounds or map state', e);
+      if (shouldFitBounds) {
+        try {
+          mapInstance.current.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+        } catch (e) {
+          console.warn('fitBounds skipped due to invalid bounds or map state', e);
+        }
       }
     }
   };
@@ -1932,7 +1934,7 @@ export default function ProspectingApp() {
   }, [selectedEstablishment?.info?.id]);
 
   useEffect(() => {
-    if (viewMode === "map") updateMarkers();
+    if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showNroOnly, showOpenOnly, customFilterActive]);
 
