@@ -164,6 +164,10 @@ export default function ProspectingApp() {
   const [showMiniRouteMap, setShowMiniRouteMap] = useState(false);
   const miniMapRef = useRef(null);
   const miniMapInstanceRef = useRef(null);
+  const [customStartPoint, setCustomStartPoint] = useState(null); // {lat, lng, address}
+  const [showStartPointModal, setShowStartPointModal] = useState(false);
+  const [startPointAddress, setStartPointAddress] = useState("");
+  const [isRoundTrip, setIsRoundTrip] = useState(false);
 
   // Map
   const mapRef = useRef(null);
@@ -839,7 +843,7 @@ export default function ProspectingApp() {
     setError("");
 
     try {
-      const waypoints = selectedForRoute.map(id => {
+      let waypoints = selectedForRoute.map(id => {
         const account = savedAccounts.find(a => a.id === id);
         return {
           lat: account.lat,
@@ -848,35 +852,38 @@ export default function ProspectingApp() {
         };
       });
 
-      // Try to get user's current location as the route origin
-      const getUserLocation = () => new Promise((resolve, reject) => {
-        if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
-        navigator.geolocation.getCurrentPosition(
-          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          (err) => reject(err),
-          { enableHighAccuracy: true, timeout: 5000 }
-        );
-      });
+      // Use custom starting point if set, otherwise try to get user's current location
+      let origin = customStartPoint ? { lat: customStartPoint.lat, lng: customStartPoint.lng } : null;
+      
+      if (!origin) {
+        const getUserLocation = () => new Promise((resolve, reject) => {
+          if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
+          navigator.geolocation.getCurrentPosition(
+            (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+            (err) => reject(err),
+            { enableHighAccuracy: true, timeout: 5000 }
+          );
+        });
 
-      let origin = null;
-      try {
-        origin = await getUserLocation();
-      } catch (e) {
-        console.warn('Could not get user location for route origin, falling back to first waypoint', e);
-        // fall back to first waypoint if available
-        if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+        try {
+          origin = await getUserLocation();
+        } catch (e) {
+          console.warn('Could not get user location for route origin, falling back to first waypoint', e);
+          if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+        }
       }
 
-      // Log what we're sending so we can debug origin issues locally
-
+      // Add origin as the final waypoint if round trip mode is enabled
+      if (isRoundTrip && origin) {
+        waypoints = [...waypoints, { lat: origin.lat, lng: origin.lng, name: 'Return to Start' }];
+      }
 
       // If origin equals the first waypoint then geolocation likely failed or was denied
       try {
         const usedFallback = origin && waypoints.length > 0 && Number(origin.lat) === Number(waypoints[0].lat) && Number(origin.lng) === Number(waypoints[0].lng);
-        if (usedFallback && typeof navigator !== 'undefined' && navigator.geolocation) {
+        if (usedFallback && typeof navigator !== 'undefined' && navigator.geolocation && !customStartPoint) {
           const msg = 'Could not access your location. Allow location access to use your current location as route start.';
           setRouteError(msg);
-          // also propagate to global search/top error so it appears in SearchForm when visible
           setError(msg);
         } else {
           setRouteError("");
@@ -931,6 +938,35 @@ export default function ProspectingApp() {
       setError(err?.message || 'Failed to calculate route');
     } finally {
       setRouteLoading(false);
+    }
+  };
+
+  // Handle setting custom starting point from address
+  const handleSetCustomStartPoint = async () => {
+    if (!startPointAddress.trim()) return;
+    
+    try {
+      // Geocode the address
+      const response = await fetch(`/api/geocode?address=${encodeURIComponent(startPointAddress)}`);
+      if (!response.ok) {
+        setError('Could not geocode the address. Please try again.');
+        return;
+      }
+      
+      const data = await response.json();
+      if (data.lat && data.lng) {
+        setCustomStartPoint({
+          lat: data.lat,
+          lng: data.lng,
+          address: startPointAddress
+        });
+        setShowStartPointModal(false);
+        setStartPointAddress("");
+      } else {
+        setError('Could not find coordinates for that address.');
+      }
+    } catch (err) {
+      setError('Failed to geocode address');
     }
   };
 
@@ -1816,11 +1852,13 @@ export default function ProspectingApp() {
       // Check if hours are already cached in the account data
       try {
         const notes = selectedEstablishment?.info?.notes || '';
-        const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
-        if (parsed?.businessHours) {
-          setBusinessHours(parsed.businessHours);
-          setHoursLoading(false);
-          return;
+        if (notes && notes.trim()) {
+          const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
+          if (parsed?.businessHours) {
+            setBusinessHours(parsed.businessHours);
+            setHoursLoading(false);
+            return;
+          }
         }
       } catch (e) {
         console.error('Error parsing notes for cached hours:', e);
@@ -1847,8 +1885,8 @@ export default function ProspectingApp() {
           // Save hours to the database if this is a saved account
           if (selectedEstablishment?.info?.id && data.hours) {
             try {
-              const notes = selectedEstablishment?.info?.notes || '';
-              const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes || {};
+              const notes = selectedEstablishment?.info?.notes || '{}';
+              const parsed = (notes && notes.trim()) ? JSON.parse(notes) : {};
               const updatedNotes = {
                 ...parsed,
                 businessHours: data.hours
@@ -1942,6 +1980,16 @@ export default function ProspectingApp() {
               const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
               const keyParts = parsed?.key ? parsed.key.split('-') : [];
               
+              // Load saved AI response if available
+              if (parsed?.aiResponse) {
+                skipAiLookupRef.current = true;
+                setAiResponse(parsed.aiResponse);
+                setAiLoading(false);
+              } else {
+                skipAiLookupRef.current = false;
+                setAiResponse("");
+              }
+              
               setSelectedEstablishment({
                 info: {
                   id: account.id,
@@ -1951,6 +1999,7 @@ export default function ProspectingApp() {
                   location_number: keyParts[1] || undefined,
                   lat: account.lat,
                   lng: account.lng,
+                  notes: account.notes, // Include notes for hours/website caching
                 },
                 history: Array.isArray(parsed?.history) ? parsed.history : [],
               });
@@ -2076,7 +2125,6 @@ export default function ProspectingApp() {
 
         // Initialize mini map if not already done
         if (!miniMapInstanceRef.current && miniMapRef.current) {
-          console.log('Initializing mini route map...');
           miniMapInstanceRef.current = L.map(miniMapRef.current, {
             zoomControl: true,
             attributionControl: false,
@@ -2115,7 +2163,6 @@ export default function ProspectingApp() {
 
         // Draw route if available
         if (calculatedRoute?.polyline && calculatedRoute.polyline.length > 0) {
-          console.log('Drawing route with', calculatedRoute.polyline.length, 'points');
           const routeLine = L.polyline(calculatedRoute.polyline, {
             color: '#10b981',
             weight: 4,
@@ -2125,6 +2172,17 @@ export default function ProspectingApp() {
           // Fit bounds to show entire route
           const bounds = routeLine.getBounds();
           miniMapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
+
+          // Add custom start point marker if set
+          if (customStartPoint && customStartPoint.lat && customStartPoint.lng) {
+            const startIcon = L.divIcon({
+              className: 'custom-mini-marker',
+              html: `<div class="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white font-bold text-sm border-2 border-white shadow-lg">📍</div>`,
+              iconSize: [40, 40],
+              iconAnchor: [20, 20],
+            });
+            L.marker([customStartPoint.lat, customStartPoint.lng], { icon: startIcon }).addTo(miniMapInstanceRef.current);
+          }
 
           // Add markers for each stop
           selectedForRoute.forEach((id, index) => {
@@ -2166,7 +2224,7 @@ export default function ProspectingApp() {
     };
 
     initMiniMap();
-  }, [showMiniRouteMap, calculatedRoute, selectedForRoute, savedAccounts]);
+  }, [showMiniRouteMap, calculatedRoute, selectedForRoute, savedAccounts, customStartPoint]);
 
   // Fly map to user's current location (if available)
   const handleMyLocation = () => {
@@ -2831,6 +2889,55 @@ export default function ProspectingApp() {
                 <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">
                   Route Planning: {selectedForRoute.length} Stop{selectedForRoute.length !== 1 ? 's' : ''} Selected
                 </div>
+                
+                {/* Starting Point and Round Trip buttons */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setShowStartPointModal(true)}
+                    className="bg-slate-700 hover:bg-slate-600 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
+                  >
+                    {customStartPoint ? '📍 Custom Start' : 'Starting Point'}
+                  </button>
+                  <button
+                    onClick={() => setIsRoundTrip(!isRoundTrip)}
+                    className={`font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg ${
+                      isRoundTrip 
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                        : 'bg-slate-700 hover:bg-slate-600 text-white'
+                    }`}
+                  >
+                    {isRoundTrip ? '✓ Round Trip' : 'Round Trip'}
+                  </button>
+                </div>
+
+                {/* Optimize Route button */}
+                {selectedForRoute.length >= 2 && (
+                  <button
+                    onClick={optimizeRoute}
+                    disabled={routeLoading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200"
+                  >
+                    {routeLoading ? 'Optimizing...' : '⚡ Optimize Route'}
+                  </button>
+                )}
+
+                {customStartPoint && (
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 text-[10px]">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-emerald-400 font-bold uppercase tracking-widest mb-1">Custom Start:</div>
+                        <div className="text-slate-300">{customStartPoint.address}</div>
+                      </div>
+                      <button
+                        onClick={() => setCustomStartPoint(null)}
+                        className="text-slate-400 hover:text-red-400 transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
                 {selectedForRoute.length >= 2 && (
                   <button
                     onClick={calculateRoute}
@@ -2933,11 +3040,29 @@ export default function ProspectingApp() {
                       </button>
                       <button
                         onClick={() => {
-                          const waypoints = selectedForRoute.map(id => {
+                          const waypointCoords = [];
+                          
+                          // Add custom start point as first waypoint if set
+                          if (customStartPoint && customStartPoint.lat && customStartPoint.lng) {
+                            waypointCoords.push(`${customStartPoint.lat},${customStartPoint.lng}`);
+                          }
+                          
+                          // Add selected route stops
+                          selectedForRoute.forEach(id => {
                             const account = savedAccounts.find(a => a.id === id);
-                            return `${account.lat},${account.lng}`;
-                          }).join('/');
-                          window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
+                            if (account && account.lat && account.lng) {
+                              waypointCoords.push(`${account.lat},${account.lng}`);
+                            }
+                          });
+                          
+                          // Add starting point as final destination if round trip
+                          if (isRoundTrip && customStartPoint && customStartPoint.lat && customStartPoint.lng) {
+                            waypointCoords.push(`${customStartPoint.lat},${customStartPoint.lng}`);
+                          }
+                          
+                          if (waypointCoords.length > 0) {
+                            window.open(`https://www.google.com/maps/dir/${waypointCoords.join('/')}`, '_blank');
+                          }
                         }}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
                       >
@@ -4113,6 +4238,117 @@ export default function ProspectingApp() {
         .leaflet-popup-tip { background: #1E293B; }
         .custom-div-icon { background: transparent; border: none; }
       `}</style>
+
+      {/* Starting Point Modal */}
+      {showStartPointModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[9999] p-4">
+          <div className="bg-[#0F172A] border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[14px] font-black uppercase text-emerald-400 tracking-widest">
+                Set Starting Point
+              </h3>
+              <button
+                onClick={() => {
+                  setShowStartPointModal(false);
+                  setStartPointAddress("");
+                }}
+                className="text-slate-400 hover:text-white text-lg transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">
+                  Enter Address
+                </label>
+                <input
+                  type="text"
+                  value={startPointAddress}
+                  onChange={(e) => setStartPointAddress(e.target.value)}
+                  placeholder="123 Main St, Austin, TX"
+                  className="w-full bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-emerald-500 focus:outline-none transition-colors"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && startPointAddress.trim()) {
+                      handleSetCustomStartPoint();
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+                        setError('Geolocation not available');
+                        return;
+                      }
+                      
+                      navigator.geolocation.getCurrentPosition(
+                        async (position) => {
+                          const lat = position.coords.latitude;
+                          const lng = position.coords.longitude;
+                          
+                          // Reverse geocode to get address
+                          try {
+                            const response = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`);
+                            if (response.ok) {
+                              const data = await response.json();
+                              setCustomStartPoint({
+                                lat,
+                                lng,
+                                address: data.address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+                              });
+                              setShowStartPointModal(false);
+                              setStartPointAddress("");
+                            } else {
+                              // Fallback to coordinates
+                              setCustomStartPoint({
+                                lat,
+                                lng,
+                                address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+                              });
+                              setShowStartPointModal(false);
+                              setStartPointAddress("");
+                            }
+                          } catch (err) {
+                            setCustomStartPoint({
+                              lat,
+                              lng,
+                              address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+                            });
+                            setShowStartPointModal(false);
+                            setStartPointAddress("");
+                          }
+                        },
+                        (err) => {
+                          setError('Could not get your location. Please allow location access.');
+                        },
+                        { enableHighAccuracy: true, timeout: 5000 }
+                      );
+                    } catch (err) {
+                      setError('Failed to get current location');
+                    }
+                  }}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200"
+                >
+                  📍 Use Current Location
+                </button>
+              </div>
+
+              <button
+                onClick={handleSetCustomStartPoint}
+                disabled={!startPointAddress.trim()}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200"
+              >
+                Set Starting Point
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
