@@ -3699,6 +3699,20 @@ export default function ProspectingApp() {
                       const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
                       const keyParts = parsed?.key ? parsed.key.split('-') : [];
                       
+                      // Load saved AI response if available
+                      if (parsed?.aiResponse) {
+                        skipAiLookupRef.current = true;
+                        setAiResponse(parsed.aiResponse);
+                        setAiLoading(false);
+                      } else {
+                        skipAiLookupRef.current = false;
+                        setAiResponse("");
+                      }
+                      
+                      // Load notes list
+                      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+                      setNotesOwner({ id: account.id, key: parsed.key || null });
+                      
                       setSelectedEstablishment({
                         info: {
                           id: account.id,
@@ -3708,6 +3722,7 @@ export default function ProspectingApp() {
                           location_number: keyParts[1] || undefined,
                           lat: account.lat,
                           lng: account.lng,
+                          notes: account.notes, // Include notes for hours/website caching
                         },
                         history: Array.isArray(parsed?.history) ? parsed.history : [],
                       });
