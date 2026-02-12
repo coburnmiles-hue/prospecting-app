@@ -161,13 +161,14 @@ export default function ProspectingApp() {
   const [routeError, setRouteError] = useState("");
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
-  const [showMiniRouteMap, setShowMiniRouteMap] = useState(false);
-  const miniMapRef = useRef(null);
-  const miniMapInstanceRef = useRef(null);
   const [customStartPoint, setCustomStartPoint] = useState(null); // {lat, lng, address}
   const [showStartPointModal, setShowStartPointModal] = useState(false);
   const [startPointAddress, setStartPointAddress] = useState("");
   const [isRoundTrip, setIsRoundTrip] = useState(false);
+  const [mapRoutePlanMode, setMapRoutePlanMode] = useState(false);
+  const mapRoutePlanModeRef = useRef(false);
+  const [mapRouteStops, setMapRouteStops] = useState([]);
+  const [draggedIndex, setDraggedIndex] = useState(null);
 
   // Map
   const mapRef = useRef(null);
@@ -906,7 +907,6 @@ export default function ProspectingApp() {
 
       const route = body;
       setCalculatedRoute(route);
-      setShowMiniRouteMap(true);
 
       // Reorder selectedForRoute based on optimized waypoint order
       if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
@@ -967,6 +967,102 @@ export default function ProspectingApp() {
       }
     } catch (err) {
       setError('Failed to geocode address');
+    }
+  };
+
+  // Optimize route by reordering waypoints for shortest distance
+  const optimizeRoute = async () => {
+    if (selectedForRoute.length < 2) {
+      setError("Please select at least 2 accounts to optimize.");
+      return;
+    }
+
+    setRouteLoading(true);
+    setError("");
+
+    try {
+      let waypoints = selectedForRoute.map(id => {
+        const account = savedAccounts.find(a => a.id === id);
+        return {
+          lat: account.lat,
+          lng: account.lng,
+          name: account.name,
+        };
+      });
+
+      // Use custom starting point if set, otherwise try to get user's current location
+      let origin = customStartPoint ? { lat: customStartPoint.lat, lng: customStartPoint.lng } : null;
+      
+      if (!origin) {
+        const getUserLocation = () => new Promise((resolve, reject) => {
+          if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
+          navigator.geolocation.getCurrentPosition(
+            (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+            (err) => reject(err),
+            { enableHighAccuracy: true, timeout: 5000 }
+          );
+        });
+
+        try {
+          origin = await getUserLocation();
+        } catch (e) {
+          console.warn('Could not get user location for route origin, falling back to first waypoint', e);
+          if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+        }
+      }
+
+      // Add origin as the final waypoint if round trip mode is enabled
+      if (isRoundTrip && origin) {
+        waypoints = [...waypoints, { lat: origin.lat, lng: origin.lng, name: 'Return to Start' }];
+      }
+
+      const res = await fetch('/api/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origin, waypoints, optimize: true }),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error('Route API error response:', body);
+        const msg = body?.error || body?.details || body?.message || 'Route optimization failed';
+        setError(`Route API: ${msg}`);
+        throw new Error(msg);
+      }
+
+      const route = body;
+      setCalculatedRoute(route);
+
+      // Reorder selectedForRoute based on optimized waypoint order
+      // Don't reorder the last waypoint if round trip is active (it's the return point)
+      if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
+        const numToReorder = isRoundTrip ? selectedForRoute.length : selectedForRoute.length;
+        const optimizedOrder = route.waypoint_order
+          .slice(0, numToReorder)
+          .map(index => selectedForRoute[index]);
+        setSelectedForRoute(optimizedOrder);
+      }
+
+      // Draw route on map if map is visible
+      if (mapInstance.current && savedSubView === 'map' && route.polyline) {
+        if (routePolylineRef.current) {
+          mapInstance.current.removeLayer(routePolylineRef.current);
+        }
+
+        const L = window.L;
+        const polyline = L.polyline(route.polyline, {
+          color: '#10b981',
+          weight: 4,
+          opacity: 0.8,
+        }).addTo(mapInstance.current);
+
+        routePolylineRef.current = polyline;
+        mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to optimize route');
+    } finally {
+      setRouteLoading(false);
     }
   };
 
@@ -1620,17 +1716,19 @@ export default function ProspectingApp() {
         const currentMinute = now.getMinutes();
         const currentTimeInMinutes = currentHour * 60 + currentMinute;
         
-        // Find today's periods
-        const todayPeriods = parsed.businessHours.periods.filter(period => {
+        // Find today's periods AND yesterday's periods (for overnight hours)
+        const yesterday = currentDay === 0 ? 6 : currentDay - 1;
+        const relevantPeriods = parsed.businessHours.periods.filter(period => {
           const dayValue = period.open?.day !== undefined ? period.open.day : null;
-          return dayValue === currentDay;
+          return dayValue === currentDay || dayValue === yesterday;
         });
 
         let isOpen = false;
         let opensWithinHour = false;
         let nextOpenTime = null;
 
-        todayPeriods.forEach(period => {
+        relevantPeriods.forEach(period => {
+          const periodDay = period.open?.day !== undefined ? period.open.day : null;
           let openTime = 0;
           let closeTime = 0;
 
@@ -1651,15 +1749,26 @@ export default function ProspectingApp() {
           }
 
           // Check if currently open
-          if (closeTime > openTime) {
-            // Same day hours
-            if (currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
-              isOpen = true;
+          if (periodDay === currentDay) {
+            // Period starts today
+            if (closeTime > openTime) {
+              // Same day hours (e.g., 9:00 AM - 5:00 PM)
+              if (currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
+                isOpen = true;
+              }
+            } else if (closeTime < openTime) {
+              // Overnight hours starting today (e.g., 10:00 PM - 2:00 AM)
+              if (currentTimeInMinutes >= openTime) {
+                isOpen = true;
+              }
             }
-          } else if (closeTime < openTime) {
-            // Overnight hours
-            if (currentTimeInMinutes >= openTime || currentTimeInMinutes < closeTime) {
-              isOpen = true;
+          } else if (periodDay === yesterday) {
+            // Period started yesterday - check if still open from overnight
+            if (closeTime < openTime) {
+              // This was an overnight period, check if we're still in the closing time
+              if (currentTimeInMinutes < closeTime) {
+                isOpen = true;
+              }
             }
           }
 
@@ -1697,9 +1806,6 @@ export default function ProspectingApp() {
           <button onclick="window.dispatchEvent(new CustomEvent('prospect:viewDetails',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#0b1220;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;margin-bottom:8px;">
             View Details
           </button>
-          <button data-prospect-id="${row.id != null ? row.id : ''}" onclick="window.dispatchEvent(new CustomEvent('prospect:addToRoute',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'},lat:${row.lat},lng:${row.lng}}}))" style="display:block;width:100%;text-align:center;background:#111827;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;margin-bottom:8px;">
-            Add To Route
-          </button>
           <button onclick="window.dispatchEvent(new CustomEvent('prospect:removePin',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#7f1d1d;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #991b1b;">
             Remove Pin
           </button>
@@ -1714,6 +1820,27 @@ export default function ProspectingApp() {
         // Prevent event bubbling
         if (e.originalEvent) {
           e.originalEvent.stopPropagation();
+        }
+        
+        // If in map route planning mode, add/remove from route instead of opening popup
+        if (mapRoutePlanModeRef.current) {
+          e.originalEvent?.preventDefault();
+          const existingIndex = mapRouteStops.findIndex(s => s.id === row.id);
+          if (existingIndex >= 0) {
+            // Remove from route
+            setMapRouteStops(stops => stops.filter((_, i) => i !== existingIndex));
+          } else {
+            // Add to route
+            setMapRouteStops(stops => [...stops, {
+              id: row.id,
+              name: row.name,
+              address: row.address,
+              lat: row.lat,
+              lng: row.lng
+            }]);
+          }
+          // Don't open popup in route mode
+          return;
         }
         
         // Open popup immediately without any map movement
@@ -1757,6 +1884,80 @@ export default function ProspectingApp() {
     setShowMapSuggestions(matches.length > 0);
   };
 
+  // Recalculate openNow status based on current time
+  const recalculateOpenNow = (hours) => {
+    if (!hours || !hours.periods || !Array.isArray(hours.periods)) {
+      return hours;
+    }
+
+    const now = new Date();
+    const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+    
+    // Find periods for today and yesterday (for overnight hours)
+    const yesterday = currentDay === 0 ? 6 : currentDay - 1;
+    const relevantPeriods = hours.periods.filter(period => {
+      const dayValue = period.open?.day !== undefined ? period.open.day : null;
+      return dayValue === currentDay || dayValue === yesterday;
+    });
+
+    let isOpen = false;
+
+    relevantPeriods.forEach(period => {
+      const periodDay = period.open?.day !== undefined ? period.open.day : null;
+      
+      let openTime = 0;
+      let closeTime = 0;
+
+      // Parse open time
+      if (period.open?.time) {
+        const openStr = period.open.time.toString().padStart(4, '0');
+        openTime = parseInt(openStr.substring(0, 2)) * 60 + parseInt(openStr.substring(2, 4));
+      } else if (period.open?.hour !== undefined && period.open?.minute !== undefined) {
+        openTime = period.open.hour * 60 + period.open.minute;
+      }
+
+      // Parse close time
+      if (period.close?.time) {
+        const closeStr = period.close.time.toString().padStart(4, '0');
+        closeTime = parseInt(closeStr.substring(0, 2)) * 60 + parseInt(closeStr.substring(2, 4));
+      } else if (period.close?.hour !== undefined && period.close?.minute !== undefined) {
+        closeTime = period.close.hour * 60 + period.close.minute;
+      }
+
+      // Check if currently open
+      if (periodDay === currentDay) {
+        // Period starts today
+        if (closeTime > openTime) {
+          // Same day hours (e.g., 9:00 AM - 5:00 PM)
+          if (currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
+            isOpen = true;
+          }
+        } else if (closeTime < openTime) {
+          // Overnight hours starting today (e.g., 10:00 PM - 2:00 AM)
+          if (currentTimeInMinutes >= openTime) {
+            isOpen = true;
+          }
+        }
+      } else if (periodDay === yesterday) {
+        // Period started yesterday - check if still open from overnight
+        if (closeTime < openTime) {
+          // This was an overnight period, check if we're still in the closing time
+          if (currentTimeInMinutes < closeTime) {
+            isOpen = true;
+          }
+        }
+      }
+    });
+
+    return {
+      ...hours,
+      openNow: isOpen
+    };
+  };
+
   // Fetch business hours when selectedEstablishment changes
   useEffect(() => {
     const fetchHours = async () => {
@@ -1770,7 +1971,9 @@ export default function ProspectingApp() {
         const notes = selectedEstablishment?.info?.notes || '';
         const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
         if (parsed?.businessHours) {
-          setBusinessHours(parsed.businessHours);
+          // Recalculate openNow status with current time
+          const hoursWithCurrentStatus = recalculateOpenNow(parsed.businessHours);
+          setBusinessHours(hoursWithCurrentStatus);
           setBusinessWebsite(parsed.businessWebsite || null);
           setHoursLoading(false);
           return;
@@ -1787,7 +1990,9 @@ export default function ProspectingApp() {
         const response = await fetch(`/api/place-details?name=${encodeURIComponent(name)}&address=${encodeURIComponent(address)}`);
         if (response.ok) {
           const data = await response.json();
-          setBusinessHours(data.hours);
+          // Recalculate openNow status with current time
+          const hoursWithCurrentStatus = recalculateOpenNow(data.hours);
+          setBusinessHours(hoursWithCurrentStatus);
           setBusinessWebsite(data.website || null);
         } else {
           setBusinessHours(null);
@@ -1857,7 +2062,9 @@ export default function ProspectingApp() {
         if (notes && notes.trim()) {
           const parsed = typeof notes === 'string' ? JSON.parse(notes) : notes;
           if (parsed?.businessHours) {
-            setBusinessHours(parsed.businessHours);
+            // Recalculate openNow status with current time
+            const hoursWithCurrentStatus = recalculateOpenNow(parsed.businessHours);
+            setBusinessHours(hoursWithCurrentStatus);
             setHoursLoading(false);
             return;
           }
@@ -1882,7 +2089,9 @@ export default function ProspectingApp() {
         if (response.ok) {
           const data = await response.json();
           console.log('Received hours from API:', data.hours);
-          setBusinessHours(data.hours);
+          // Recalculate openNow status with current time
+          const hoursWithCurrentStatus = recalculateOpenNow(data.hours);
+          setBusinessHours(hoursWithCurrentStatus);
           
           // Save hours to the database if this is a saved account
           if (selectedEstablishment?.info?.id && data.hours) {
@@ -2061,172 +2270,6 @@ export default function ProspectingApp() {
       // ignore
     }
   }, [selectedForRoute]);
-
-  // Initialize and update mini route map
-  useEffect(() => {
-    if (!showMiniRouteMap || !miniMapRef.current) {
-      // Clean up map when hiding
-      if (miniMapInstanceRef.current && !showMiniRouteMap) {
-        try {
-          miniMapInstanceRef.current.remove();
-          miniMapInstanceRef.current = null;
-        } catch (e) {
-          console.error('Error cleaning up mini map:', e);
-        }
-      }
-      return;
-    }
-
-    // Load Leaflet CSS and JS if not already loaded
-    const loadLeaflet = () => {
-      return new Promise((resolve) => {
-        if (window.L) {
-          resolve();
-          return;
-        }
-
-        // Check if already loading
-        if (document.querySelector('link[href*="leaflet.css"]') && document.querySelector('script[src*="leaflet.js"]')) {
-          const checkInterval = setInterval(() => {
-            if (window.L) {
-              clearInterval(checkInterval);
-              resolve();
-            }
-          }, 100);
-          return;
-        }
-
-        // Load CSS
-        if (!document.querySelector('link[href*="leaflet.css"]')) {
-          const link = document.createElement("link");
-          link.rel = "stylesheet";
-          link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-          document.head.appendChild(link);
-        }
-
-        // Load JS
-        if (!document.querySelector('script[src*="leaflet.js"]')) {
-          const script = document.createElement("script");
-          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-          script.onload = () => resolve();
-          document.head.appendChild(script);
-        }
-      });
-    };
-
-    const initMiniMap = async () => {
-      try {
-        // Ensure Leaflet is loaded
-        await loadLeaflet();
-        
-        const L = window.L;
-        if (!L) {
-          console.error('Leaflet failed to load');
-          return;
-        }
-
-        // Initialize mini map if not already done
-        if (!miniMapInstanceRef.current && miniMapRef.current) {
-          miniMapInstanceRef.current = L.map(miniMapRef.current, {
-            zoomControl: true,
-            attributionControl: false,
-            dragging: true,
-            scrollWheelZoom: true,
-            doubleClickZoom: true,
-          }).setView(TEXAS_CENTER, 10);
-
-          // Add tile layer
-          if (MAPBOX_KEY) {
-            L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
-              tileSize: 512,
-              zoomOffset: -1,
-              maxZoom: 22,
-            }).addTo(miniMapInstanceRef.current);
-          } else {
-            L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-              maxZoom: 19,
-            }).addTo(miniMapInstanceRef.current);
-          }
-
-          L.control.zoom({ position: "bottomright" }).addTo(miniMapInstanceRef.current);
-        }
-
-        if (!miniMapInstanceRef.current) {
-          console.error('Failed to create mini map instance');
-          return;
-        }
-
-        // Clear existing route layers
-        miniMapInstanceRef.current.eachLayer((layer) => {
-          if (layer instanceof L.Marker || layer instanceof L.Polyline) {
-            miniMapInstanceRef.current.removeLayer(layer);
-          }
-        });
-
-        // Draw route if available
-        if (calculatedRoute?.polyline && calculatedRoute.polyline.length > 0) {
-          const routeLine = L.polyline(calculatedRoute.polyline, {
-            color: '#10b981',
-            weight: 4,
-            opacity: 0.8,
-          }).addTo(miniMapInstanceRef.current);
-
-          // Fit bounds to show entire route
-          const bounds = routeLine.getBounds();
-          miniMapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
-
-          // Add custom start point marker if set
-          if (customStartPoint && customStartPoint.lat && customStartPoint.lng) {
-            const startIcon = L.divIcon({
-              className: 'custom-mini-marker',
-              html: `<div class="flex items-center justify-center w-10 h-10 rounded-full bg-blue-500 text-white font-bold text-sm border-2 border-white shadow-lg">📍</div>`,
-              iconSize: [40, 40],
-              iconAnchor: [20, 20],
-            });
-            L.marker([customStartPoint.lat, customStartPoint.lng], { icon: startIcon }).addTo(miniMapInstanceRef.current);
-          }
-
-          // Add markers for each stop
-          selectedForRoute.forEach((id, index) => {
-            const account = savedAccounts.find(a => a.id === id);
-            if (account && account.lat && account.lng) {
-              const icon = L.divIcon({
-                className: 'custom-mini-marker',
-                html: `<div class="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500 text-white font-bold text-xs border-2 border-white shadow-lg">${index + 1}</div>`,
-                iconSize: [32, 32],
-                iconAnchor: [16, 16],
-              });
-              
-              L.marker([account.lat, account.lng], { icon }).addTo(miniMapInstanceRef.current);
-            }
-          });
-        } else {
-          console.log('No route polyline available');
-        }
-
-        // Force map to recalculate size multiple times to ensure rendering
-        setTimeout(() => {
-          if (miniMapInstanceRef.current) {
-            miniMapInstanceRef.current.invalidateSize();
-          }
-        }, 50);
-        setTimeout(() => {
-          if (miniMapInstanceRef.current) {
-            miniMapInstanceRef.current.invalidateSize();
-          }
-        }, 200);
-        setTimeout(() => {
-          if (miniMapInstanceRef.current) {
-            miniMapInstanceRef.current.invalidateSize();
-          }
-        }, 500);
-      } catch (error) {
-        console.error('Error initializing mini map:', error);
-      }
-    };
-
-    initMiniMap();
-  }, [showMiniRouteMap, calculatedRoute, selectedForRoute, savedAccounts, customStartPoint]);
 
   // Fly map to user's current location (if available)
   const handleMyLocation = () => {
@@ -2619,46 +2662,6 @@ export default function ProspectingApp() {
         ? `${data.id || data.name}-${data.created_at || ""}`
         : `${data.taxpayer_number}-${data.location_number}`;
 
-    // Route planning mode - show checkbox instead of normal click
-    if (routePlanMode && viewMode === "saved") {
-      const isSelected = selectedForRoute.includes(data.id);
-      return (
-        <div
-          key={itemKey}
-          className={`relative bg-[#0F172A] border ${isSelected ? 'border-emerald-500 bg-emerald-600/10 shadow-refined-lg' : 'border-slate-700/50 shadow-refined'} rounded-3xl p-5 cursor-pointer transition-all duration-200 hover:border-emerald-400 hover:shadow-refined-lg hover:scale-[1.01]`}
-          onClick={() => {
-            setSelectedForRoute(prev => 
-              prev.includes(data.id) 
-                ? prev.filter(id => id !== data.id)
-                : [...prev, data.id]
-            );
-          }}
-        >
-          <div className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={() => {}}
-              className="mt-1 w-4 h-4 rounded border-slate-600 text-emerald-600 focus:ring-emerald-600"
-            />
-            <div className="flex-1">
-              <div className="text-[11px] font-black uppercase text-white tracking-wider leading-tight">
-                {title}
-              </div>
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-                {subtitle}
-              </div>
-              {selectedForRoute.includes(data.id) && (
-                <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">
-                  Stop #{selectedForRoute.indexOf(data.id) + 1}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <ListItemButton
         key={itemKey}
@@ -2811,16 +2814,6 @@ export default function ProspectingApp() {
                   setManualQuery("");
                   setManualGpvTier(null);
                 }}
-                onPlanRoute={() => {
-                  setRoutePlanMode((m) => !m);
-                  setSelectedForRoute([]);
-                  setCalculatedRoute(null);
-                  if (routePolylineRef.current && mapInstance.current) {
-                    mapInstance.current.removeLayer(routePolylineRef.current);
-                    routePolylineRef.current = null;
-                  }
-                }}
-                routePlanMode={routePlanMode}
               />
             ) : viewMode === "nro" ? (
               <div className="bg-gradient-to-br from-indigo-600/15 to-indigo-600/5 border border-indigo-500/30 rounded-3xl p-6 shadow-refined-lg">
@@ -3389,8 +3382,8 @@ export default function ProspectingApp() {
             <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
               
               {/* Floating search bar */}
-              <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3">
-                <div className="flex-1 max-w-md relative">
+              <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3 pointer-events-none">
+                <div className="flex-1 max-w-md relative pointer-events-auto">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                   <input
                     type="text"
@@ -3671,6 +3664,395 @@ export default function ProspectingApp() {
               >
                 <MapPin size={24} />
               </button>
+
+              {/* Route Planning Button - Top Left */}
+              <button
+                onClick={() => {
+                  const newMode = !mapRoutePlanMode;
+                  setMapRoutePlanMode(newMode);
+                  mapRoutePlanModeRef.current = newMode;
+                  if (mapRoutePlanMode) {
+                    setMapRouteStops([]);
+                    setCalculatedRoute(null);
+                    if (routePolylineRef.current && mapInstance.current) {
+                      mapInstance.current.removeLayer(routePolylineRef.current);
+                      routePolylineRef.current = null;
+                    }
+                  }
+                }}
+                title="Plan route"
+                className={`absolute top-24 left-6 z-[1000] px-4 py-3 rounded-2xl backdrop-blur-md border text-white font-black text-[11px] uppercase tracking-widest transition-all shadow-2xl ${
+                  mapRoutePlanMode 
+                    ? 'bg-emerald-600 border-emerald-500 hover:bg-emerald-500' 
+                    : 'bg-slate-900/90 border-slate-700 hover:bg-slate-800/90'
+                }`}
+              >
+                {mapRoutePlanMode ? '✓ Route Mode' : '🗺️ Plan Route'}
+              </button>
+
+              {/* Route Planning Panel */}
+              {mapRoutePlanMode && (
+                <div className="absolute top-6 right-6 z-[1000] w-80 max-h-[calc(100vh-120px)] overflow-y-auto bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-3xl p-5 shadow-2xl">
+                  <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest mb-4">
+                    Route Planning: {mapRouteStops.length} Stop{mapRouteStops.length !== 1 ? 's' : ''}
+                  </div>
+
+                  {/* Starting Point and Round Trip buttons */}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <button
+                      onClick={() => setShowStartPointModal(true)}
+                      className="bg-slate-700 hover:bg-slate-600 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
+                    >
+                      {customStartPoint ? '📍 Custom' : 'Start Point'}
+                    </button>
+                    <button
+                      onClick={() => setIsRoundTrip(!isRoundTrip)}
+                      className={`font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg ${
+                        isRoundTrip 
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                          : 'bg-slate-700 hover:bg-slate-600 text-white'
+                      }`}
+                    >
+                      {isRoundTrip ? '✓ Round' : 'Round Trip'}
+                    </button>
+                  </div>
+
+                  {customStartPoint && (
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 text-[10px] mb-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-emerald-400 font-bold uppercase tracking-widest mb-1">Custom Start:</div>
+                          <div className="text-slate-300">{customStartPoint.address}</div>
+                        </div>
+                        <button
+                          onClick={() => setCustomStartPoint(null)}
+                          className="text-slate-400 hover:text-red-400 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Optimize Route button */}
+                  {mapRouteStops.length >= 2 && (
+                    <button
+                      onClick={async () => {
+                        setRouteLoading(true);
+                        try {
+                          let waypoints = mapRouteStops.map(stop => ({
+                            lat: stop.lat,
+                            lng: stop.lng,
+                            name: stop.name,
+                          }));
+
+                          let origin = customStartPoint ? { lat: customStartPoint.lat, lng: customStartPoint.lng } : null;
+                          
+                          if (!origin && typeof navigator !== 'undefined' && navigator.geolocation) {
+                            try {
+                              const pos = await new Promise((resolve, reject) => {
+                                navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+                              });
+                              origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                            } catch (e) {
+                              if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+                            }
+                          }
+
+                          if (isRoundTrip && origin) {
+                            waypoints = [...waypoints, { lat: origin.lat, lng: origin.lng, name: 'Return to Start' }];
+                          }
+
+                          const res = await fetch('/api/route', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ origin, waypoints, optimize: true }),
+                          });
+
+                          const route = await res.json();
+                          if (res.ok) {
+                            setCalculatedRoute(route);
+
+                            if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
+                              const numToReorder = isRoundTrip ? mapRouteStops.length : mapRouteStops.length;
+                              const optimizedOrder = route.waypoint_order
+                                .slice(0, numToReorder)
+                                .map(index => mapRouteStops[index]);
+                              setMapRouteStops(optimizedOrder);
+                            }
+
+                            if (mapInstance.current && route.polyline) {
+                              if (routePolylineRef.current) {
+                                mapInstance.current.removeLayer(routePolylineRef.current);
+                              }
+                              const L = window.L;
+                              const polyline = L.polyline(route.polyline, {
+                                color: '#10b981',
+                                weight: 4,
+                                opacity: 0.8,
+                              }).addTo(mapInstance.current);
+                              routePolylineRef.current = polyline;
+                              mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+                            }
+                          }
+                        } catch (err) {
+                          setError(err?.message || 'Failed to optimize route');
+                        } finally {
+                          setRouteLoading(false);
+                        }
+                      }}
+                      disabled={routeLoading}
+                      className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 mb-3"
+                    >
+                      {routeLoading ? 'Optimizing...' : '⚡ Optimize Route'}
+                    </button>
+                  )}
+
+                  {/* Calculate Route button */}
+                  {mapRouteStops.length >= 2 && (
+                    <button
+                      onClick={async () => {
+                        setRouteLoading(true);
+                        try {
+                          let waypoints = mapRouteStops.map(stop => ({
+                            lat: stop.lat,
+                            lng: stop.lng,
+                            name: stop.name,
+                          }));
+
+                          let origin = customStartPoint ? { lat: customStartPoint.lat, lng: customStartPoint.lng } : null;
+                          
+                          if (!origin && typeof navigator !== 'undefined' && navigator.geolocation) {
+                            try {
+                              const pos = await new Promise((resolve, reject) => {
+                                navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+                              });
+                              origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                            } catch (e) {
+                              if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
+                            }
+                          }
+
+                          if (isRoundTrip && origin) {
+                            waypoints = [...waypoints, { lat: origin.lat, lng: origin.lng, name: 'Return to Start' }];
+                          }
+
+                          const res = await fetch('/api/route', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ origin, waypoints }),
+                          });
+
+                          const route = await res.json();
+                          if (res.ok) {
+                            setCalculatedRoute(route);
+
+                            if (mapInstance.current && route.polyline) {
+                              if (routePolylineRef.current) {
+                                mapInstance.current.removeLayer(routePolylineRef.current);
+                              }
+                              const L = window.L;
+                              const polyline = L.polyline(route.polyline, {
+                                color: '#10b981',
+                                weight: 4,
+                                opacity: 0.8,
+                              }).addTo(mapInstance.current);
+                              routePolylineRef.current = polyline;
+                              mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+                            }
+                          }
+                        } catch (err) {
+                          setError(err?.message || 'Failed to calculate route');
+                        } finally {
+                          setRouteLoading(false);
+                        }
+                      }}
+                      disabled={routeLoading}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 mb-3"
+                    >
+                      {routeLoading ? 'Calculating...' : '🧭 Calculate Route'}
+                    </button>
+                  )}
+
+                  {/* Route info */}
+                  {calculatedRoute && (
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 mb-3">
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <div className="text-slate-400 font-bold uppercase tracking-wider">Distance</div>
+                          <div className="text-white font-black">{(calculatedRoute.distance / 1609.34).toFixed(1)} mi</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-400 font-bold uppercase tracking-wider">Time</div>
+                          <div className="text-white font-black">{Math.round(calculatedRoute.duration / 60)} min</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Draggable Route Stops List */}
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">Route Stops (Drag to Reorder)</div>
+                  <div className="space-y-2 max-h-96 overflow-y-auto custom-scroll">
+                    {mapRouteStops.map((stop, index) => (
+                      <div
+                        key={`${stop.id}-${index}`}
+                        draggable
+                        onDragStart={() => setDraggedIndex(index)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => {
+                          if (draggedIndex !== null && draggedIndex !== index) {
+                            const newStops = [...mapRouteStops];
+                            const draggedStop = newStops[draggedIndex];
+                            newStops.splice(draggedIndex, 1);
+                            newStops.splice(index, 0, draggedStop);
+                            setMapRouteStops(newStops);
+                            setDraggedIndex(null);
+                          }
+                        }}
+                        className="bg-slate-800/70 border border-slate-700 rounded-xl p-3 cursor-move hover:border-emerald-500 transition-all"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] font-black text-white truncate">{stop.name}</div>
+                            <div className="text-[9px] font-bold text-slate-400 truncate">{stop.address}</div>
+                          </div>
+                          <button
+                            onClick={() => setMapRouteStops(stops => stops.filter((_, i) => i !== index))}
+                            className="flex-shrink-0 text-slate-400 hover:text-red-400 transition-colors"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {mapRouteStops.length === 0 && (
+                      <div className="text-[11px] text-slate-500 text-center py-4">
+                        Click pins on the map to add stops
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Buttons - Save & Open in Maps */}
+                  {mapRouteStops.length >= 2 && (
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                            const cities = new Set();
+                            
+                            for (const stop of mapRouteStops) {
+                              if (stop.address) {
+                                const parts = stop.address.split(',');
+                                if (parts.length >= 2) {
+                                  const city = parts[1].trim();
+                                  if (city) cities.add(city);
+                                }
+                              }
+                            }
+                            
+                            const routeData = {
+                              stops: mapRouteStops.map(s => ({
+                                id: s.id,
+                                name: s.name,
+                                address: s.address,
+                                lat: s.lat,
+                                lng: s.lng
+                              })),
+                              customStartPoint,
+                              isRoundTrip,
+                              polyline: calculatedRoute?.polyline || null,
+                              calculatedRoute: calculatedRoute ? {
+                                distance: calculatedRoute.distance,
+                                duration: calculatedRoute.duration
+                              } : null
+                            };
+                            
+                            let routeName;
+                            if (cities.size === 0) {
+                              routeName = `Route - ${today}`;
+                            } else if (cities.size === 1) {
+                              routeName = `${[...cities][0]} Route`;
+                            } else if (cities.size === 2) {
+                              routeName = `${[...cities].join(' & ')} Route`;
+                            } else {
+                              routeName = `${[...cities].slice(0, 2).join(' & ')} + ${cities.size - 2} More`;
+                            }
+                            
+                            const response = await fetch('/api/saved-routes', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                name: routeName,
+                                routeData,
+                              }),
+                            });
+                            
+                            if (response.ok) {
+                              alert('Route saved successfully!');
+                            } else {
+                              alert('Failed to save route');
+                            }
+                          } catch (err) {
+                            console.error('Save route error:', err);
+                            alert('Error saving route');
+                          }
+                        }}
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
+                      >
+                        💾 Save Route
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const waypointCoords = [];
+                          
+                          // Add custom start point as first waypoint if set
+                          if (customStartPoint && customStartPoint.lat && customStartPoint.lng) {
+                            waypointCoords.push(`${customStartPoint.lat},${customStartPoint.lng}`);
+                          } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+                            // Get current location as start point
+                            try {
+                              const pos = await new Promise((resolve, reject) => {
+                                navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+                              });
+                              waypointCoords.push(`${pos.coords.latitude},${pos.coords.longitude}`);
+                            } catch (e) {
+                              // If geolocation fails, don't add a start point
+                            }
+                          }
+                          
+                          // Add map route stops
+                          mapRouteStops.forEach(stop => {
+                            if (stop.lat && stop.lng) {
+                              waypointCoords.push(`${stop.lat},${stop.lng}`);
+                            }
+                          });
+                          
+                          // Add starting point as final destination if round trip
+                          if (isRoundTrip) {
+                            if (customStartPoint && customStartPoint.lat && customStartPoint.lng) {
+                              waypointCoords.push(`${customStartPoint.lat},${customStartPoint.lng}`);
+                            } else if (waypointCoords.length > 0) {
+                              // Round trip back to first waypoint
+                              waypointCoords.push(waypointCoords[0]);
+                            }
+                          }
+                          
+                          if (waypointCoords.length > 0) {
+                            window.open(`https://www.google.com/maps/dir/${waypointCoords.join('/')}`, '_blank');
+                          }
+                        }}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
+                      >
+                        🗺️ Open in Maps
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : viewMode === "metrics" ? (
             <div className="space-y-6">
@@ -3794,19 +4176,21 @@ export default function ProspectingApp() {
                                 ✕
                               </button>
                             </div>
-                            <div className="flex items-center gap-4 mb-3">
-                              <div className="text-emerald-400 font-bold text-sm">
-                                {(routeData.distance / 1609.34).toFixed(1)} mi
+                            {(routeData.calculatedRoute || routeData.distance) && (
+                              <div className="flex items-center gap-4 mb-3">
+                                <div className="text-emerald-400 font-bold text-sm">
+                                  {((routeData.calculatedRoute?.distance || routeData.distance) / 1609.34).toFixed(1)} mi
+                                </div>
+                                <div className="text-slate-500">•</div>
+                                <div className="text-emerald-400 font-bold text-sm">
+                                  {Math.round((routeData.calculatedRoute?.duration || routeData.duration) / 60)} min
+                                </div>
                               </div>
-                              <div className="text-slate-500">•</div>
-                              <div className="text-emerald-400 font-bold text-sm">
-                                {Math.round(routeData.duration / 60)} min
-                              </div>
-                            </div>
+                            )}
                             <div className="mb-3">
-                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Stops ({routeData.accounts.length})</div>
+                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Stops ({(routeData.stops || routeData.accounts || []).length})</div>
                               <div className="space-y-1">
-                                {routeData.accounts.map((account, idx) => (
+                                {(routeData.stops || routeData.accounts || []).map((account, idx) => (
                                   <div key={idx} className="text-[11px] text-slate-300 flex items-center gap-2">
                                     <span className="bg-indigo-600 rounded-full w-5 h-5 flex items-center justify-center text-white font-bold text-[9px]">
                                       {idx + 1}
@@ -3817,9 +4201,37 @@ export default function ProspectingApp() {
                               </div>
                             </div>
                             <button
-                              onClick={() => {
-                                const waypoints = routeData.accounts.map(a => `${a.lat},${a.lng}`).join('/');
-                                window.open(`https://www.google.com/maps/dir/${waypoints}`, '_blank');
+                              onClick={async () => {
+                                const waypointCoords = [];
+                                
+                                // Add custom start point if available
+                                if (routeData.customStartPoint && routeData.customStartPoint.lat && routeData.customStartPoint.lng) {
+                                  waypointCoords.push(`${routeData.customStartPoint.lat},${routeData.customStartPoint.lng}`);
+                                } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+                                  // Get current location as start point
+                                  try {
+                                    const pos = await new Promise((resolve, reject) => {
+                                      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+                                    });
+                                    waypointCoords.push(`${pos.coords.latitude},${pos.coords.longitude}`);
+                                  } catch (e) {
+                                    // If geolocation fails, don't add a start point
+                                  }
+                                }
+                                
+                                // Add route stops
+                                (routeData.stops || routeData.accounts || []).forEach(a => {
+                                  waypointCoords.push(`${a.lat},${a.lng}`);
+                                });
+                                
+                                // Add round trip back to start if needed
+                                if (routeData.isRoundTrip && waypointCoords.length > 0) {
+                                  waypointCoords.push(waypointCoords[0]);
+                                }
+                                
+                                if (waypointCoords.length > 0) {
+                                  window.open(`https://www.google.com/maps/dir/${waypointCoords.join('/')}`, '_blank');
+                                }
                               }}
                               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl transition-all shadow-refined hover:shadow-refined-lg hover:scale-[1.02]"
                             >
@@ -3831,37 +4243,6 @@ export default function ProspectingApp() {
                     })}
                   </div>
                 )}
-              </div>
-            </div>
-          ) : showMiniRouteMap && calculatedRoute ? (
-            <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between">
-                <div className="text-[11px] font-black uppercase text-emerald-400 tracking-widest">
-                  Route Preview
-                </div>
-                <button
-                  onClick={() => setShowMiniRouteMap(false)}
-                  className="text-slate-400 hover:text-white text-sm transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="relative w-full h-[calc(100vh-280px)] rounded-2xl overflow-hidden border-2 border-emerald-500/30">
-                <div ref={miniMapRef} className="w-full h-full" />
-              </div>
-              <div className="grid grid-cols-2 gap-4 text-[10px]">
-                <div className="bg-emerald-600/10 border border-emerald-500/20 rounded-xl p-3">
-                  <div className="text-slate-400 uppercase tracking-widest mb-1">Distance</div>
-                  <div className="text-emerald-300 font-bold text-lg">
-                    {(calculatedRoute.distance / 1609.34).toFixed(1)} mi
-                  </div>
-                </div>
-                <div className="bg-emerald-600/10 border border-emerald-500/20 rounded-xl p-3">
-                  <div className="text-slate-400 uppercase tracking-widest mb-1">Est. Time</div>
-                  <div className="text-emerald-300 font-bold text-lg">
-                    {Math.round(calculatedRoute.duration / 60)} min
-                  </div>
-                </div>
               </div>
             </div>
           ) : selectedEstablishment ? (
@@ -4164,9 +4545,9 @@ export default function ProspectingApp() {
       </main>
 
       {/* Fixed Bottom Navigation Dock */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[9999] pb-safe">
+      <nav className="fixed bottom-0 left-0 right-0 z-[9999] pb-safe pointer-events-none">
         <div className="max-w-3xl mx-auto px-4 pb-4">
-          <div className="flex gap-2 bg-[#1E293B]/95 backdrop-blur-lg p-2 rounded-3xl border border-slate-700 shadow-2xl">
+          <div className="flex gap-2 bg-[#1E293B]/95 backdrop-blur-lg p-2 rounded-3xl border border-slate-700 shadow-2xl pointer-events-auto">
             <button
               onClick={() => {
                 setViewMode("search");
