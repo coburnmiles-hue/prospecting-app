@@ -71,7 +71,6 @@ import { VENUE_TYPES, GPV_TIERS, BASE_URL, DATE_FIELD, TOTAL_FIELD, TEXAS_CENTER
 // Custom Hooks
 import { useSavedAccounts, useMetricsData } from "../hooks/useData";
 import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
-import { useRoutePlanning } from "../hooks/useRoutePlanning";
 
 
 
@@ -152,23 +151,20 @@ export default function ProspectingApp() {
   const savingLockStateRef = useRef(false);
   const skipAiLookupRef = useRef(false);
 
-  // Route planning
-  const [routePlanMode, setRoutePlanMode] = useState(false);
-  const [selectedForRoute, setSelectedForRoute] = useState([]);
+  // Route planning (map only)
   const [calculatedRoute, setCalculatedRoute] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const routePolylineRef = useRef(null);
-  const [routeError, setRouteError] = useState("");
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
   const [customStartPoint, setCustomStartPoint] = useState(null); // {lat, lng, address}
-  const [showStartPointModal, setShowStartPointModal] = useState(false);
-  const [startPointAddress, setStartPointAddress] = useState("");
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [mapRoutePlanMode, setMapRoutePlanMode] = useState(false);
   const mapRoutePlanModeRef = useRef(false);
   const [mapRouteStops, setMapRouteStops] = useState([]);
   const [draggedIndex, setDraggedIndex] = useState(null);
+  const [showStartPointModal, setShowStartPointModal] = useState(false);
+  const [startPointAddress, setStartPointAddress] = useState("");
 
   // Map
   const mapRef = useRef(null);
@@ -834,237 +830,7 @@ export default function ProspectingApp() {
   };
 
   // ---------- Route Planning ----------
-  const calculateRoute = async () => {
-    if (selectedForRoute.length < 2) {
-      setError("Please select at least 2 accounts to plan a route.");
-      return;
-    }
-
-    setRouteLoading(true);
-    setError("");
-
-    try {
-      let waypoints = selectedForRoute.map(id => {
-        const account = savedAccounts.find(a => a.id === id);
-        return {
-          lat: account.lat,
-          lng: account.lng,
-          name: account.name,
-        };
-      });
-
-      // Use custom starting point if set, otherwise try to get user's current location
-      let origin = customStartPoint ? { lat: customStartPoint.lat, lng: customStartPoint.lng } : null;
-      
-      if (!origin) {
-        const getUserLocation = () => new Promise((resolve, reject) => {
-          if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
-          navigator.geolocation.getCurrentPosition(
-            (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-            (err) => reject(err),
-            { enableHighAccuracy: true, timeout: 5000 }
-          );
-        });
-
-        try {
-          origin = await getUserLocation();
-        } catch (e) {
-          console.warn('Could not get user location for route origin, falling back to first waypoint', e);
-          if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
-        }
-      }
-
-      // Add origin as the final waypoint if round trip mode is enabled
-      if (isRoundTrip && origin) {
-        waypoints = [...waypoints, { lat: origin.lat, lng: origin.lng, name: 'Return to Start' }];
-      }
-
-      // If origin equals the first waypoint then geolocation likely failed or was denied
-      try {
-        const usedFallback = origin && waypoints.length > 0 && Number(origin.lat) === Number(waypoints[0].lat) && Number(origin.lng) === Number(waypoints[0].lng);
-        if (usedFallback && typeof navigator !== 'undefined' && navigator.geolocation && !customStartPoint) {
-          const msg = 'Could not access your location. Allow location access to use your current location as route start.';
-          setRouteError(msg);
-          setError(msg);
-        } else {
-          setRouteError("");
-        }
-      } catch (e) {}
-
-      const res = await fetch('/api/route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin, waypoints }),
-      });
-
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.error('Route API error response:', body);
-        const msg = body?.error || body?.details || body?.message || 'Route calculation failed';
-        setError(`Route API: ${msg}`);
-        throw new Error(msg);
-      }
-
-      const route = body;
-      setCalculatedRoute(route);
-
-      // Reorder selectedForRoute based on optimized waypoint order
-      if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
-        const optimizedOrder = route.waypoint_order.map(index => selectedForRoute[index]);
-        setSelectedForRoute(optimizedOrder);
-      }
-
-      // Draw route on map if map is visible
-      if (mapInstance.current && savedSubView === 'map' && route.polyline) {
-        // Remove existing route if any
-        if (routePolylineRef.current) {
-          mapInstance.current.removeLayer(routePolylineRef.current);
-        }
-
-        // Draw new route
-        const L = window.L;
-        const polyline = L.polyline(route.polyline, {
-          color: '#10b981',
-          weight: 4,
-          opacity: 0.8,
-        }).addTo(mapInstance.current);
-
-        routePolylineRef.current = polyline;
-
-        // Fit map to route bounds
-        mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
-      }
-    } catch (err) {
-      setError(err?.message || 'Failed to calculate route');
-    } finally {
-      setRouteLoading(false);
-    }
-  };
-
-  // Handle setting custom starting point from address
-  const handleSetCustomStartPoint = async () => {
-    if (!startPointAddress.trim()) return;
-    
-    try {
-      // Geocode the address
-      const response = await fetch(`/api/geocode?address=${encodeURIComponent(startPointAddress)}`);
-      if (!response.ok) {
-        setError('Could not geocode the address. Please try again.');
-        return;
-      }
-      
-      const data = await response.json();
-      if (data.lat && data.lng) {
-        setCustomStartPoint({
-          lat: data.lat,
-          lng: data.lng,
-          address: startPointAddress
-        });
-        setShowStartPointModal(false);
-        setStartPointAddress("");
-      } else {
-        setError('Could not find coordinates for that address.');
-      }
-    } catch (err) {
-      setError('Failed to geocode address');
-    }
-  };
-
-  // Optimize route by reordering waypoints for shortest distance
-  const optimizeRoute = async () => {
-    if (selectedForRoute.length < 2) {
-      setError("Please select at least 2 accounts to optimize.");
-      return;
-    }
-
-    setRouteLoading(true);
-    setError("");
-
-    try {
-      let waypoints = selectedForRoute.map(id => {
-        const account = savedAccounts.find(a => a.id === id);
-        return {
-          lat: account.lat,
-          lng: account.lng,
-          name: account.name,
-        };
-      });
-
-      // Use custom starting point if set, otherwise try to get user's current location
-      let origin = customStartPoint ? { lat: customStartPoint.lat, lng: customStartPoint.lng } : null;
-      
-      if (!origin) {
-        const getUserLocation = () => new Promise((resolve, reject) => {
-          if (typeof navigator === 'undefined' || !navigator.geolocation) return reject(new Error('Geolocation not available'));
-          navigator.geolocation.getCurrentPosition(
-            (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-            (err) => reject(err),
-            { enableHighAccuracy: true, timeout: 5000 }
-          );
-        });
-
-        try {
-          origin = await getUserLocation();
-        } catch (e) {
-          console.warn('Could not get user location for route origin, falling back to first waypoint', e);
-          if (waypoints.length > 0) origin = { lat: waypoints[0].lat, lng: waypoints[0].lng };
-        }
-      }
-
-      // Add origin as the final waypoint if round trip mode is enabled
-      if (isRoundTrip && origin) {
-        waypoints = [...waypoints, { lat: origin.lat, lng: origin.lng, name: 'Return to Start' }];
-      }
-
-      const res = await fetch('/api/route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin, waypoints, optimize: true }),
-      });
-
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.error('Route API error response:', body);
-        const msg = body?.error || body?.details || body?.message || 'Route optimization failed';
-        setError(`Route API: ${msg}`);
-        throw new Error(msg);
-      }
-
-      const route = body;
-      setCalculatedRoute(route);
-
-      // Reorder selectedForRoute based on optimized waypoint order
-      // Don't reorder the last waypoint if round trip is active (it's the return point)
-      if (route.waypoint_order && Array.isArray(route.waypoint_order)) {
-        const numToReorder = isRoundTrip ? selectedForRoute.length : selectedForRoute.length;
-        const optimizedOrder = route.waypoint_order
-          .slice(0, numToReorder)
-          .map(index => selectedForRoute[index]);
-        setSelectedForRoute(optimizedOrder);
-      }
-
-      // Draw route on map if map is visible
-      if (mapInstance.current && savedSubView === 'map' && route.polyline) {
-        if (routePolylineRef.current) {
-          mapInstance.current.removeLayer(routePolylineRef.current);
-        }
-
-        const L = window.L;
-        const polyline = L.polyline(route.polyline, {
-          color: '#10b981',
-          weight: 4,
-          opacity: 0.8,
-        }).addTo(mapInstance.current);
-
-        routePolylineRef.current = polyline;
-        mapInstance.current.fitBounds(polyline.getBounds(), { padding: [50, 50] });
-      }
-    } catch (err) {
-      setError(err?.message || 'Failed to optimize route');
-    } finally {
-      setRouteLoading(false);
-    }
-  };
+  // Old route planning functions removed - route planning is now map-only
 
   // ---------- AI ----------
   // Fetch AI text for a given info object. If updateState is true, set `aiLoading`/`aiResponse`.
@@ -2082,13 +1848,11 @@ export default function ProspectingApp() {
         return;
       }
 
-      console.log('Fetching hours from API for:', name);
       setHoursLoading(true);
       try {
         const response = await fetch(`/api/place-details?name=${encodeURIComponent(name)}&address=${encodeURIComponent(address)}`);
         if (response.ok) {
           const data = await response.json();
-          console.log('Received hours from API:', data.hours);
           // Recalculate openNow status with current time
           const hoursWithCurrentStatus = recalculateOpenNow(data.hours);
           setBusinessHours(hoursWithCurrentStatus);
@@ -2149,34 +1913,7 @@ export default function ProspectingApp() {
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
-    const onAdd = (e) => {
-      try {
-        const entry = e?.detail || {};
-        if (!entry || entry.id == null) return;
-
-        setSelectedForRoute((prev) => {
-          if (prev.includes(entry.id)) {
-            const next = prev.filter(id => id !== entry.id);
-            setRoutePlanMode(next.length > 0);
-            return next;
-          } else {
-            // Add new stop: ensure route planning UI is visible
-            try {
-              setViewMode('saved');
-              // Keep the map visible and show routing controls on the side
-              setSavedSubView('map');
-              // Clear any selected account so the details panel doesn't replace the map
-              setSelectedEstablishment(null);
-            } catch {}
-            const next = [...prev, entry.id];
-            setRoutePlanMode(true);
-            return next;
-          }
-        });
-      } catch (err) {
-        console.error('addToRoute handler failed', err);
-      }
-    };
+    // Old route event handler removed - route planning is now map-only
 
     const onView = (e) => {
       try {
@@ -2245,31 +1982,13 @@ export default function ProspectingApp() {
       }
     };
 
-    window.addEventListener('prospect:addToRoute', onAdd);
     window.addEventListener('prospect:viewDetails', onView);
     window.addEventListener('prospect:removePin', onRemove);
     return () => {
-      window.removeEventListener('prospect:addToRoute', onAdd);
       window.removeEventListener('prospect:viewDetails', onView);
       window.removeEventListener('prospect:removePin', onRemove);
     };
-  }, [setSelectedForRoute, setRoutePlanMode, setViewMode, setSavedSubView, savedAccounts, refreshSavedAccounts, selectedEstablishment, setSelectedEstablishment]);
-
-  // Reflect selectedForRoute state in any open/populated popup buttons
-  useEffect(() => {
-    try {
-      const buttons = Array.from(document.querySelectorAll('[data-prospect-id]'));
-      buttons.forEach((btn) => {
-        const idAttr = btn.getAttribute('data-prospect-id');
-        if (idAttr == null || idAttr === '') return;
-        const idNum = Number(idAttr);
-        const selected = selectedForRoute.includes(idNum) || selectedForRoute.includes(idAttr);
-        if (selected) btn.classList.add('route-added'); else btn.classList.remove('route-added');
-      });
-    } catch (e) {
-      // ignore
-    }
-  }, [selectedForRoute]);
+  }, [setViewMode, setSavedSubView, savedAccounts, refreshSavedAccounts, selectedEstablishment, setSelectedEstablishment]);
 
   // Fly map to user's current location (if available)
   const handleMyLocation = () => {
@@ -2878,196 +2597,7 @@ export default function ProspectingApp() {
               />
             )}
 
-            {/* Route Planning Panel */}
-            {routePlanMode && viewMode === "saved" && (
-              <div className="bg-gradient-to-br from-emerald-600/15 to-emerald-600/5 border border-emerald-500/30 rounded-3xl p-5 space-y-3 shadow-refined-lg">
-                <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">
-                  Route Planning: {selectedForRoute.length} Stop{selectedForRoute.length !== 1 ? 's' : ''} Selected
-                </div>
-                
-                {/* Starting Point and Round Trip buttons */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setShowStartPointModal(true)}
-                    className="bg-slate-700 hover:bg-slate-600 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
-                  >
-                    {customStartPoint ? '📍 Custom Start' : 'Starting Point'}
-                  </button>
-                  <button
-                    onClick={() => setIsRoundTrip(!isRoundTrip)}
-                    className={`font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg ${
-                      isRoundTrip 
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
-                        : 'bg-slate-700 hover:bg-slate-600 text-white'
-                    }`}
-                  >
-                    {isRoundTrip ? '✓ Round Trip' : 'Round Trip'}
-                  </button>
-                </div>
-
-                {/* Optimize Route button */}
-                {selectedForRoute.length >= 2 && (
-                  <button
-                    onClick={optimizeRoute}
-                    disabled={routeLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200"
-                  >
-                    {routeLoading ? 'Optimizing...' : '⚡ Optimize Route'}
-                  </button>
-                )}
-
-                {customStartPoint && (
-                  <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 text-[10px]">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-emerald-400 font-bold uppercase tracking-widest mb-1">Custom Start:</div>
-                        <div className="text-slate-300">{customStartPoint.address}</div>
-                      </div>
-                      <button
-                        onClick={() => setCustomStartPoint(null)}
-                        className="text-slate-400 hover:text-red-400 transition-colors"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                )}
-                
-                {selectedForRoute.length >= 2 && (
-                  <button
-                    onClick={calculateRoute}
-                    disabled={routeLoading}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg hover:scale-[1.02]"
-                  >
-                    {routeLoading ? 'Calculating...' : 'Calculate Route'}
-                  </button>
-                )}
-                {!!routeError && (
-                  <div className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3">
-                    {routeError}
-                  </div>
-                )}
-                {calculatedRoute && (
-                  <div className="mt-3 space-y-2 text-[10px]">
-                    <div className="flex justify-between text-emerald-300 font-bold">
-                      <span>Total Distance:</span>
-                      <span>{(calculatedRoute.distance / 1609.34).toFixed(1)} mi</span>
-                    </div>
-                    <div className="flex justify-between text-emerald-300 font-bold">
-                      <span>Est. Time:</span>
-                      <span>{Math.round(calculatedRoute.duration / 60)} min</span>
-                    </div>
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={async () => {
-                          try {
-                            const today = new Date().toLocaleDateString('en-US', { 
-                              month: 'short', 
-                              day: 'numeric', 
-                              year: 'numeric' 
-                            });
-                            const routeData = {
-                              accounts: selectedForRoute.map(id => {
-                                const account = savedAccounts.find(a => a.id === id);
-                                return {
-                                  id: account.id,
-                                  name: account.name,
-                                  address: account.address,
-                                  lat: account.lat,
-                                  lng: account.lng,
-                                };
-                              }),
-                              distance: calculatedRoute.distance,
-                              duration: calculatedRoute.duration,
-                              polyline: calculatedRoute.polyline,
-                            };
-                            
-                            // Extract cities from addresses to name the route
-                            const cities = new Set();
-                            selectedForRoute.forEach(id => {
-                              const account = savedAccounts.find(a => a.id === id);
-                              if (account?.address) {
-                                // Address format is typically: "Street, City, TX"
-                                const parts = account.address.split(',');
-                                if (parts.length >= 2) {
-                                  const city = parts[parts.length - 2].trim();
-                                  if (city && city !== 'TX') {
-                                    cities.add(city);
-                                  }
-                                }
-                              }
-                            });
-                            
-                            // Generate route name from cities
-                            let routeName;
-                            if (cities.size === 0) {
-                              routeName = `Route - ${today}`;
-                            } else if (cities.size === 1) {
-                              routeName = `${[...cities][0]} Route`;
-                            } else if (cities.size === 2) {
-                              routeName = `${[...cities].join(' & ')} Route`;
-                            } else {
-                              routeName = `${[...cities].slice(0, 2).join(' & ')} + ${cities.size - 2} More`;
-                            }
-                            
-                            const response = await fetch('/api/saved-routes', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                name: routeName,
-                                routeData,
-                              }),
-                            });
-                            
-                            if (response.ok) {
-                              alert('Route saved successfully!');
-                            } else {
-                              alert('Failed to save route');
-                            }
-                          } catch (err) {
-                            console.error('Save route error:', err);
-                            alert('Error saving route');
-                          }
-                        }}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
-                      >
-                        Save Route
-                      </button>
-                      <button
-                        onClick={() => {
-                          const waypointCoords = [];
-                          
-                          // Add custom start point as first waypoint if set
-                          if (customStartPoint && customStartPoint.lat && customStartPoint.lng) {
-                            waypointCoords.push(`${customStartPoint.lat},${customStartPoint.lng}`);
-                          }
-                          
-                          // Add selected route stops
-                          selectedForRoute.forEach(id => {
-                            const account = savedAccounts.find(a => a.id === id);
-                            if (account && account.lat && account.lng) {
-                              waypointCoords.push(`${account.lat},${account.lng}`);
-                            }
-                          });
-                          
-                          // Add starting point as final destination if round trip
-                          if (isRoundTrip && customStartPoint && customStartPoint.lat && customStartPoint.lng) {
-                            waypointCoords.push(`${customStartPoint.lat},${customStartPoint.lng}`);
-                          }
-                          
-                          if (waypointCoords.length > 0) {
-                            window.open(`https://www.google.com/maps/dir/${waypointCoords.join('/')}`, '_blank');
-                          }
-                        }}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
-                      >
-                        Open in Maps
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Route Planning Panel removed - route planning is now map-only */}
 
             {/* Manual Add Panel */}
             {viewMode === 'saved' && manualAddOpen && (
