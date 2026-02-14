@@ -6,7 +6,7 @@ export function useSavedAccounts() {
   useEffect(() => {
     const fetchSaved = async () => {
       try {
-        const res = await fetch("/api/accounts", { cache: "no-store" });
+        const res = await fetch("/api/accounts", { cache: "no-store", credentials: 'include' });
         if (!res.ok) return;
         const data = await res.json();
         setSavedAccounts(Array.isArray(data) ? data : []);
@@ -19,7 +19,7 @@ export function useSavedAccounts() {
 
   const refreshSavedAccounts = async () => {
     try {
-      const res = await fetch("/api/accounts", { cache: "no-store" });
+      const res = await fetch("/api/accounts", { cache: "no-store", credentials: 'include' });
       if (!res.ok) return;
       const data = await res.json();
       setSavedAccounts(Array.isArray(data) ? data : []);
@@ -39,7 +39,7 @@ export function useMetricsData() {
     const fetchMetrics = async () => {
       setMetricsLoading(true);
       try {
-        const res = await fetch("/api/sheets", { cache: "no-store" });
+        const res = await fetch("/api/sheets", { cache: "no-store", credentials: 'include' });
         if (!res.ok) return;
         const data = await res.json();
         setMetricsData(data);

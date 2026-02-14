@@ -35,7 +35,10 @@ export default function PersonalMetrics({ data, onActivityClick }) {
     // Fetch activities for selected date
     const fetchActivities = async () => {
       try {
-        const accounts = await fetch('/api/accounts', { cache: 'no-store' }).then(async (r) => {
+        const accounts = await fetch('/api/accounts', { 
+          cache: 'no-store',
+          credentials: 'include'
+        }).then(async (r) => {
           if (!r.ok) {
             const txt = await r.text().catch(() => '');
             throw new Error(`Accounts API error ${r.status}: ${txt}`);

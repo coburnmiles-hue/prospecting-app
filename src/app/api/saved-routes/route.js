@@ -1,11 +1,19 @@
 import { neon } from "@neondatabase/serverless";
+import { getUserIdFromRequest } from "@/lib/auth";
 
 export async function GET(request) {
   try {
+    const userId = await getUserIdFromRequest(request);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL);
     const rows = await sql`
       SELECT id, name, route_data, created_at
       FROM saved_routes
+      WHERE user_id = ${userId}
       ORDER BY created_at DESC
     `;
     return Response.json(rows);
@@ -17,6 +25,12 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
+    const userId = await getUserIdFromRequest(request);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { name, routeData } = body;
 
@@ -25,20 +39,10 @@ export async function POST(request) {
     }
 
     const sql = neon(process.env.DATABASE_URL);
-    
-    // Create table if it doesn't exist
-    await sql`
-      CREATE TABLE IF NOT EXISTS saved_routes (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        route_data JSONB NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `;
 
     const result = await sql`
-      INSERT INTO saved_routes (name, route_data)
-      VALUES (${name}, ${JSON.stringify(routeData)})
+      INSERT INTO saved_routes (user_id, name, route_data)
+      VALUES (${userId}, ${name}, ${JSON.stringify(routeData)})
       RETURNING id, name, route_data, created_at
     `;
 

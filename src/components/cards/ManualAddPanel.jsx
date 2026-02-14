@@ -199,7 +199,12 @@ export default function ManualAddPanel({
               };
 
               try {
-                const res = await fetch('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const res = await fetch('/api/accounts', { 
+                  method: 'POST', 
+                  headers: { 'Content-Type': 'application/json' }, 
+                  body: JSON.stringify(payload),
+                  credentials: 'include'
+                });
                 if (!res.ok) throw new Error('Save failed');
                 const created = await res.json();
                 await refreshSavedAccounts();

@@ -18,6 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Sparkles,
   ExternalLink,
@@ -76,8 +77,20 @@ import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
 
 // -------------------- Component --------------------
 export default function ProspectingApp() {
+  const router = useRouter();
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""; // do NOT hardcode keys
   const MAPBOX_KEY = process.env.NEXT_PUBLIC_MAPBOX_KEY || "";
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      router.push('/login');
+      router.refresh();
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
 
   const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics | map | nro
   const [savedSubView, setSavedSubView] = useState("list"); // list | info
@@ -428,7 +441,7 @@ export default function ProspectingApp() {
       try {
         const existing = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => `${a.notes || ""}`.includes(key));
         if (existing && existing.id) {
-          await fetch(`/api/accounts?id=${existing.id}`, { method: "DELETE" });
+          await fetch(`/api/accounts?id=${existing.id}`, { method: "DELETE", credentials: 'include' });
         }
         await refreshSavedAccounts();
       } catch (err) {
@@ -525,6 +538,7 @@ export default function ProspectingApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        credentials: 'include'
       });
 
       if (!res.ok) throw new Error("Save failed.");
@@ -535,7 +549,7 @@ export default function ProspectingApp() {
       // For manual accounts, keep the account selected and load the saved data
       if (isManual) {
         // Find the newly saved account
-        const updatedAccounts = await fetch('/api/accounts').then(r => r.json());
+        const updatedAccounts = await fetch('/api/accounts', { credentials: 'include' }).then(r => r.json());
         const newlySaved = updatedAccounts.find(a => {
           const aName = (a.name || '').toLowerCase();
           const aAddr = (a.address || '').toLowerCase();
@@ -725,6 +739,7 @@ export default function ProspectingApp() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          credentials: 'include'
         });
 
         if (!res.ok) throw new Error("Auto-save failed");
@@ -747,6 +762,7 @@ export default function ProspectingApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: saved.id, text: currentNote, activity_type: activityType }),
+        credentials: 'include'
       });
       
       if (!res.ok) throw new Error("Note save failed");
@@ -761,7 +777,7 @@ export default function ProspectingApp() {
 
       // refresh current gpv tier from saved row if present
       try {
-        const refreshedRow = (await fetch("/api/accounts", { cache: "no-store" }).then((r) => r.json())).find((r) => r.id === saved.id);
+        const refreshedRow = (await fetch("/api/accounts", { cache: "no-store", credentials: 'include' }).then((r) => r.json())).find((r) => r.id === saved.id);
         if (refreshedRow) {
           const parsed = parseSavedNotes(refreshedRow.notes);
             if (parsed?.gpvTier !== selectedGpvTier) {
@@ -806,7 +822,7 @@ export default function ProspectingApp() {
     }
 
     try {
-      const res = await fetch(`/api/notes?accountId=${saved.id}&noteId=${noteId}`, { method: "DELETE" });
+      const res = await fetch(`/api/notes?accountId=${saved.id}&noteId=${noteId}`, { method: "DELETE", credentials: 'include' });
       if (!res.ok) throw new Error("Delete failed");
       const body = await res.json();
       setNotesList(Array.isArray(body.notes) ? body.notes : []);
@@ -909,7 +925,8 @@ export default function ProspectingApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           notes: updatedNotes
-        })
+        }),
+        credentials: 'include'
       });
       
       if (res.ok) {
@@ -950,7 +967,7 @@ export default function ProspectingApp() {
   const fetchSavedRoutes = async () => {
     setSavedRoutesLoading(true);
     try {
-      const response = await fetch('/api/saved-routes');
+      const response = await fetch('/api/saved-routes', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setSavedRoutes(data);
@@ -1201,8 +1218,9 @@ export default function ProspectingApp() {
           }
           setTimeout(() => {
             try {
-              mapInstance.current.invalidateSize();
-
+              if (mapInstance.current) {
+                mapInstance.current.invalidateSize();
+              }
             } catch (e) {
               console.error('invalidateSize failed', e);
             }
@@ -1969,7 +1987,7 @@ export default function ProspectingApp() {
         if (id != null) {
           const confirmed = window.confirm('Remove this pin from your saved accounts?');
           if (confirmed) {
-            await fetch(`/api/accounts?id=${id}`, { method: 'DELETE' });
+            await fetch(`/api/accounts?id=${id}`, { method: 'DELETE', credentials: 'include' });
             await refreshSavedAccounts();
             // Clear selected if it was the deleted account
             if (selectedEstablishment?.info?.id === id) {
@@ -2105,6 +2123,7 @@ export default function ProspectingApp() {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+                credentials: 'include'
               }).then(async (res) => {
                 if (res.ok) {
                   await refreshSavedAccounts();
@@ -2151,6 +2170,7 @@ export default function ProspectingApp() {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+          credentials: 'include'
         }).then(async (res) => {
           if (res.ok) {
             await refreshSavedAccounts();
@@ -2503,8 +2523,8 @@ export default function ProspectingApp() {
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
-      {/* Header */}
-      <header className="max-w-6xl mx-auto mb-10 flex justify-center items-center">
+      {/* Header with Logout Button */}
+      <header className="max-w-6xl mx-auto mb-10 flex justify-between items-center">
         <div className="flex items-center gap-4">
           <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-3 rounded-2xl shadow-lg shadow-indigo-600/30">
             <Navigation className="text-white" size={28} />
@@ -2515,6 +2535,16 @@ export default function ProspectingApp() {
             </h1>
           </div>
         </div>
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-red-400 hover:text-red-300 hover:bg-red-600/10 transition-all duration-200 border border-red-600/30 hover:border-red-500/50"
+          title="Logout"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          <span>Logout</span>
+        </button>
       </header>
 
       {/* Main */}
@@ -3519,6 +3549,7 @@ export default function ProspectingApp() {
                                 name: routeName,
                                 routeData,
                               }),
+                              credentials: 'include'
                             });
                             
                             if (response.ok) {

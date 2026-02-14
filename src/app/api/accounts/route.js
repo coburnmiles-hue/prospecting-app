@@ -1,11 +1,19 @@
 import { neon } from "@neondatabase/serverless";
+import { getUserIdFromRequest } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request) {
   try {
+    const userId = await getUserIdFromRequest(request);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL);
     const rows = await sql`
       SELECT id, name, address, lat, lng, notes, created_at
       FROM accounts
+      WHERE user_id = ${userId}
       ORDER BY created_at DESC
     `;
     return Response.json(rows, { status: 200 });
@@ -17,6 +25,12 @@ export async function GET() {
 
 export async function POST(req) {
   try {
+    const userId = await getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL);
     const body = await req.json();
 
@@ -34,8 +48,8 @@ export async function POST(req) {
     }
 
     const rows = await sql`
-      INSERT INTO accounts (name, address, lat, lng, notes)
-      VALUES (${name}, ${address}, ${lat}, ${lng}, ${notes})
+      INSERT INTO accounts (user_id, name, address, lat, lng, notes)
+      VALUES (${userId}, ${name}, ${address}, ${lat}, ${lng}, ${notes})
       RETURNING id, name, address, lat, lng, notes, created_at
     `;
 

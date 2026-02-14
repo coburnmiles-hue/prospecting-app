@@ -1,7 +1,45 @@
 import { google } from 'googleapis';
+import { sql } from '@vercel/postgres';
 
-export async function GET(req) {
+function getUserIdFromRequest(request) {
+  const authCookie = request.cookies.get('auth-token');
+  if (!authCookie || !authCookie.value) return null;
+  
+  const userId = parseInt(authCookie.value, 10);
+  return isNaN(userId) ? null : userId;
+}
+
+export async function GET(request) {
   try {
+    // Get user ID from auth cookie
+    const userId = getUserIdFromRequest(request);
+    
+    if (!userId) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Get user's google sheet ID from database
+    const userResult = await sql`
+      SELECT google_sheet_id FROM users WHERE id = ${userId}
+    `;
+
+    if (userResult.rows.length === 0) {
+      return Response.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    let spreadsheetId = userResult.rows[0].google_sheet_id;
+
+    // If user doesn't have a sheet ID set, return error
+    if (!spreadsheetId) {
+      return Response.json({
+        error: 'No Google Sheet connected',
+        message: 'Please set up your Google Sheet ID in settings to view metrics.',
+        rawRows: [],
+        data: [],
+        count: 0
+      }, { status: 200 });
+    }
+
     // Use a server-only env var for API key in production
     const apiKey = process.env.GOOGLE_SHEETS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_SHEETS_API_KEY;
 
@@ -11,9 +49,6 @@ export async function GET(req) {
     }
 
     const sheets = google.sheets({ version: 'v4', auth: apiKey });
-
-    // Prefer server-side env var for spreadsheet id
-    const spreadsheetId = process.env.GOOGLE_SHEETS_ID || process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID || '1hRLoxq2i_k-0JmbvU-l8wvc-rRtm3n2mLD_xX-pLPiQ';
     
     // Get data from the "App Export" sheet (return both raw rows and a header-mapped form)
     const response = await sheets.spreadsheets.values.get({

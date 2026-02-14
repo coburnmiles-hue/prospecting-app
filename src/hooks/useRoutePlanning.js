@@ -46,6 +46,7 @@ export function useRoutePlanning(savedAccounts, mapInstance) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ origin, waypoints }),
+        credentials: 'include'
       });
 
       if (!res.ok) {

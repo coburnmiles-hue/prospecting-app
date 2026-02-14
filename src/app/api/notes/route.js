@@ -1,10 +1,11 @@
 import { neon } from "@neondatabase/serverless";
+import { getUserIdFromRequest } from "@/lib/auth";
 
-async function readNotesRow(sql, accountId) {
+async function readNotesRow(sql, accountId, userId) {
   const rows = await sql`
     SELECT id, notes
     FROM accounts
-    WHERE id = ${accountId}
+    WHERE id = ${accountId} AND user_id = ${userId}
     LIMIT 1
   `;
   return rows[0] || null;
@@ -12,6 +13,12 @@ async function readNotesRow(sql, accountId) {
 
 export async function GET(req) {
   try {
+    const userId = await getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL);
     const url = new URL(req.url);
     const accountId = Number(url.searchParams.get("accountId"));
@@ -19,7 +26,7 @@ export async function GET(req) {
       return Response.json({ error: "Valid ?accountId= is required" }, { status: 400 });
     }
 
-    const row = await readNotesRow(sql, accountId);
+    const row = await readNotesRow(sql, accountId, userId);
     if (!row) return Response.json({ notes: [] }, { status: 200 });
 
     const raw = row.notes || "";
@@ -38,6 +45,12 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const userId = await getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL);
     const body = await req.json();
     const accountId = Number(body?.accountId);
@@ -48,7 +61,7 @@ export async function POST(req) {
       return Response.json({ error: "accountId and text are required" }, { status: 400 });
     }
 
-    const row = await readNotesRow(sql, accountId);
+    const row = await readNotesRow(sql, accountId, userId);
     if (!row) return Response.json({ error: "Account not found" }, { status: 404 });
 
     const now = new Date();
@@ -85,7 +98,7 @@ export async function POST(req) {
     const updated = await sql`
       UPDATE accounts
       SET notes = ${JSON.stringify(notesObj)}
-      WHERE id = ${accountId}
+      WHERE id = ${accountId} AND user_id = ${userId}
       RETURNING id, notes
     `;
 
@@ -98,6 +111,12 @@ export async function POST(req) {
 
 export async function DELETE(req) {
   try {
+    const userId = await getUserIdFromRequest(req);
+    
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const sql = neon(process.env.DATABASE_URL);
     const url = new URL(req.url);
     const accountId = Number(url.searchParams.get("accountId"));
@@ -107,7 +126,7 @@ export async function DELETE(req) {
       return Response.json({ error: "accountId and noteId are required" }, { status: 400 });
     }
 
-    const row = await readNotesRow(sql, accountId);
+    const row = await readNotesRow(sql, accountId, userId);
     if (!row) return Response.json({ error: "Account not found" }, { status: 404 });
 
     let notesObj = { notes: [] };
@@ -130,7 +149,7 @@ export async function DELETE(req) {
     await sql`
       UPDATE accounts
       SET notes = ${JSON.stringify(notesObj)}
-      WHERE id = ${accountId}
+      WHERE id = ${accountId} AND user_id = ${userId}
     `;
 
     return Response.json({ notes: notesObj.notes }, { status: 200 });
