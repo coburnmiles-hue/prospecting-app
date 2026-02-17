@@ -2521,6 +2521,33 @@ export default function ProspectingApp() {
       }
     };
 
+    // Handle setting custom start point from address input
+    const handleSetCustomStartPoint = async () => {
+      if (!startPointAddress.trim()) {
+        setError('Please enter an address');
+        return;
+      }
+
+      try {
+        // Geocode the address
+        const response = await fetch(`/api/geocode?address=${encodeURIComponent(startPointAddress)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setCustomStartPoint({
+            lat: data.lat,
+            lng: data.lng,
+            address: data.address || startPointAddress
+          });
+          setShowStartPointModal(false);
+          setStartPointAddress("");
+        } else {
+          setError('Could not find that address. Please try another.');
+        }
+      } catch (err) {
+        setError('Could not geocode address: ' + err.message);
+      }
+    };
+
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
       {/* Header with Logout Button */}
