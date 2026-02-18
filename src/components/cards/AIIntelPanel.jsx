@@ -5,12 +5,38 @@ export default function AIIntelPanel({
   aiResponse,
   onRefresh
 }) {
+  console.log('Raw AI Response:', aiResponse);
+  
   // Parse the three sections from the response
   const parseSection = (text, sectionName) => {
-    if (!text) return "Not available";
-    const regex = new RegExp(`${sectionName}:\\s*(.+?)(?=\\n(?:OWNERS|LOCATION COUNT|ACCOUNT DETAILS):|$)`, 'is');
-    const match = text.match(regex);
-    return match ? match[1].trim() : "Not available";
+    if (!text) {
+      console.log(`${sectionName}: No text provided`);
+      return "Not available";
+    }
+    
+    console.log(`Parsing ${sectionName} from:`, text.substring(0, 200));
+    
+    // Try to find the section with various patterns
+    const patterns = [
+      // Pattern 1: "SECTION NAME: content" followed by next section or end
+      new RegExp(`${sectionName}:\\s*([\\s\\S]*?)(?=\\n\\s*(?:OWNERS|LOCATION COUNT|ACCOUNT DETAILS):|$)`, 'i'),
+      // Pattern 2: "**SECTION NAME:** content" (markdown bold)
+      new RegExp(`\\*\\*${sectionName}:\\*\\*\\s*([\\s\\S]*?)(?=\\n\\s*\\*\\*(?:OWNERS|LOCATION COUNT|ACCOUNT DETAILS):|$)`, 'i'),
+      // Pattern 3: Just the section name as a header
+      new RegExp(`${sectionName}\\s*\\n([\\s\\S]*?)(?=\\n\\s*(?:OWNERS|LOCATION COUNT|ACCOUNT DETAILS)\\s*\\n|$)`, 'i')
+    ];
+    
+    for (let i = 0; i < patterns.length; i++) {
+      const pattern = patterns[i];
+      const match = text.match(pattern);
+      if (match && match[1] && match[1].trim()) {
+        console.log(`${sectionName} matched with pattern ${i + 1}:`, match[1].trim().substring(0, 100));
+        return match[1].trim();
+      }
+    }
+    
+    console.log(`${sectionName}: No match found`);
+    return "Not available";
   };
 
   const owners = parseSection(aiResponse, "OWNERS");

@@ -92,6 +92,39 @@ export default function ProspectingApp() {
     }
   };
 
+  // Handle setting custom start point for routes
+  const handleSetCustomStartPoint = async () => {
+    if (!startPointAddress.trim()) return;
+
+    try {
+      const response = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: startPointAddress })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.lat && data.lng) {
+          setCustomStartPoint({
+            lat: data.lat,
+            lng: data.lng,
+            address: data.address || startPointAddress
+          });
+          setShowStartPointModal(false);
+          setStartPointAddress("");
+        } else {
+          setError('Could not geocode address');
+        }
+      } else {
+        setError('Failed to geocode address');
+      }
+    } catch (err) {
+      setError('Error geocoding address');
+      console.error('Geocode error:', err);
+    }
+  };
+
   const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics | map | nro
   const [savedSubView, setSavedSubView] = useState("list"); // list | info
 
@@ -887,6 +920,7 @@ export default function ProspectingApp() {
 
       const text = (bodyJson && (bodyJson.text || (bodyJson.raw && bodyJson.raw?.candidates?.[0]?.content?.parts?.[0]?.text))) || "";
       const finalText = String(text || "No response received.").trim();
+      console.log('AI Intel Response:', finalText);
       if (updateState) setAiResponse(finalText);
       return finalText;
     } catch (err) {
@@ -1280,6 +1314,61 @@ export default function ProspectingApp() {
       // Determine pin color by GPV tier if present
       const parsed = parseSavedNotes(row.notes);
       const tier = parsed?.gpvTier || null;
+      
+      // Calculate if business is currently open
+      if (parsed?.businessHours?.periods && Array.isArray(parsed.businessHours.periods)) {
+        const now = new Date();
+        const currentDay = now.getDay();
+        const currentHour = now.getHours();
+        const currentMinute = now.getMinutes();
+        const currentTimeInMinutes = currentHour * 60 + currentMinute;
+        const yesterday = currentDay === 0 ? 6 : currentDay - 1;
+        
+        let isOpen = false;
+        
+        parsed.businessHours.periods.forEach(period => {
+          const periodDay = period.open?.day !== undefined ? period.open.day : null;
+          let openTime = 0;
+          let closeTime = 0;
+
+          // Parse open time
+          if (period.open?.time) {
+            const openStr = period.open.time.toString().padStart(4, '0');
+            openTime = parseInt(openStr.substring(0, 2)) * 60 + parseInt(openStr.substring(2, 4));
+          } else if (period.open?.hour !== undefined && period.open?.minute !== undefined) {
+            openTime = period.open.hour * 60 + period.open.minute;
+          }
+
+          // Parse close time
+          if (period.close?.time) {
+            const closeStr = period.close.time.toString().padStart(4, '0');
+            closeTime = parseInt(closeStr.substring(0, 2)) * 60 + parseInt(closeStr.substring(2, 4));
+          } else if (period.close?.hour !== undefined && period.close?.minute !== undefined) {
+            closeTime = period.close.hour * 60 + period.close.minute;
+          }
+
+          // Check if currently open
+          if (periodDay === currentDay) {
+            if (closeTime > openTime) {
+              if (currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
+                isOpen = true;
+              }
+            } else if (closeTime < openTime) {
+              if (currentTimeInMinutes >= openTime) {
+                isOpen = true;
+              }
+            }
+          } else if (periodDay === yesterday) {
+            if (closeTime < openTime) {
+              if (currentTimeInMinutes < closeTime) {
+                isOpen = true;
+              }
+            }
+          }
+        });
+        
+        parsed.businessHours.openNow = isOpen;
+      }
       
       // If 'show only active' is enabled, skip any non-active pins
       if (showActiveOnly && !parsed?.activeAccount) return;
@@ -2521,33 +2610,6 @@ export default function ProspectingApp() {
       }
     };
 
-    // Handle setting custom start point from address input
-    const handleSetCustomStartPoint = async () => {
-      if (!startPointAddress.trim()) {
-        setError('Please enter an address');
-        return;
-      }
-
-      try {
-        // Geocode the address
-        const response = await fetch(`/api/geocode?address=${encodeURIComponent(startPointAddress)}`);
-        if (response.ok) {
-          const data = await response.json();
-          setCustomStartPoint({
-            lat: data.lat,
-            lng: data.lng,
-            address: data.address || startPointAddress
-          });
-          setShowStartPointModal(false);
-          setStartPointAddress("");
-        } else {
-          setError('Could not find that address. Please try another.');
-        }
-      } catch (err) {
-        setError('Could not geocode address: ' + err.message);
-      }
-    };
-
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
       {/* Header with Logout Button */}
@@ -2966,7 +3028,8 @@ export default function ProspectingApp() {
         {/* Right column */}
         <section className={viewMode === "metrics" || viewMode === "map" ? "lg:col-span-12" : "lg:col-span-8"}>
           {viewMode === "map" ? (
-            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
+            <>
+              <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
               
               {/* Floating search bar */}
               <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3 pointer-events-none">
@@ -3251,8 +3314,11 @@ export default function ProspectingApp() {
               >
                 <MapPin size={24} />
               </button>
+            </div>
 
-              {/* Route Planning Button - Top Left */}
+            {/* Route Planning Section - Below Map */}
+            <div className="mt-6">
+              {/* Route Planning Button */}
               <button
                 onClick={() => {
                   const newMode = !mapRoutePlanMode;
@@ -3268,18 +3334,18 @@ export default function ProspectingApp() {
                   }
                 }}
                 title="Plan route"
-                className={`absolute top-24 left-6 z-[1000] px-4 py-3 rounded-2xl backdrop-blur-md border text-white font-black text-[11px] uppercase tracking-widest transition-all shadow-2xl ${
+                className={`w-full px-6 py-4 rounded-2xl border text-white font-black text-sm uppercase tracking-widest transition-all shadow-lg ${
                   mapRoutePlanMode 
                     ? 'bg-emerald-600 border-emerald-500 hover:bg-emerald-500' 
                     : 'bg-slate-900/90 border-slate-700 hover:bg-slate-800/90'
                 }`}
               >
-                {mapRoutePlanMode ? '✓ Route Mode' : '🗺️ Plan Route'}
+                {mapRoutePlanMode ? '✓ Route Planning Active' : '🗺️ Plan Route'}
               </button>
 
               {/* Route Planning Panel */}
               {mapRoutePlanMode && (
-                <div className="absolute top-6 right-6 z-[1000] w-80 max-h-[calc(100vh-120px)] overflow-y-auto bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-3xl p-5 shadow-2xl">
+                <div className="mt-6 w-full bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-3xl p-5 shadow-2xl">
                   <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest mb-4">
                     Route Planning: {mapRouteStops.length} Stop{mapRouteStops.length !== 1 ? 's' : ''}
                   </div>
@@ -3642,6 +3708,7 @@ export default function ProspectingApp() {
                 </div>
               )}
             </div>
+            </>
           ) : viewMode === "metrics" ? (
             <div className="space-y-6">
               {/* Metrics Section */}

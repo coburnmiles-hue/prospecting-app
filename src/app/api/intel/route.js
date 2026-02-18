@@ -14,19 +14,25 @@ export async function POST(req) {
     }
 
     // Three-section prompt requesting structured output
-    const prompt = `Find the individual owners or executive management for "${businessName}" in ${city}, TX. Look specifically for the people behind the LLC "${taxpayer}". 
+    const prompt = `Research this business and provide specific factual information in exactly this format:
 
-Please provide your response in EXACTLY this format:
+Business: ${businessName}
+Location: ${city}, Texas
+Entity Name: ${taxpayer}
 
-OWNERS: [List individual people's names, titles, or relationships. If not found, say "Not readily available"]
+Respond with ONLY the three sections below - no introduction, no acknowledgment:
 
-LOCATION COUNT: [Number of locations this business operates. If not found, say "Unknown"]
+OWNERS: [List the individual owners, operators, or key executives with their names and titles. If specific names are not available, describe the ownership structure (e.g., "Private LLC", "Family-owned")]
 
-ACCOUNT DETAILS: [Brief company overview, industry, notable info. If not found, provide general context]`;
+LOCATION COUNT: [State exactly how many physical locations this business operates. Examples: "Single location", "3 locations in Texas", "15+ locations nationwide"]
+
+ACCOUNT DETAILS: [Provide: Business type/industry, services offered, approximate size/scale, year established if known, notable information about operations]
+
+Do not include any preamble or closing. Start directly with "OWNERS:" and provide factual, specific information for each section.`;
 
     // Helper: call Gemini with retry/backoff
     const callGeminiWithRetry = async (payload, retries = 4, delay = 800) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
       try {
         const resp = await fetch(url, {
           method: "POST",
@@ -61,18 +67,24 @@ ACCOUNT DETAILS: [Brief company overview, industry, notable info. If not found, 
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
       systemInstruction: { 
-        parts: [{ text: "You are a business intelligence assistant specialized in the Texas hospitality market." }] 
+        parts: [{ text: "You are a business research assistant. Provide factual business information in the exact format requested. Do not include preambles or acknowledgments." }] 
       },
-      tools: [{ "google_search": {} }]
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2048,
+      },
+      tools: [{ googleSearch: {} }]
     };
 
     const result = await callGeminiWithRetry(payload);
     if (!result.ok) {
       const bodyText = result.bodyText || result.error || "Unknown error";
+      console.error('Gemini API Error:', bodyText, 'Status:', result.status);
       return new Response(JSON.stringify({ error: bodyText, status: result.status || 500, parsed: result.parsed || null }), { status: 502 });
     }
 
     const parsed = result.parsed || {};
+    console.log('Gemini response:', JSON.stringify(parsed, null, 2));
     const candidateText = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || parsed?.candidates?.[0]?.output || "";
 
     return new Response(JSON.stringify({ raw: parsed, text: candidateText }), { status: 200 });
