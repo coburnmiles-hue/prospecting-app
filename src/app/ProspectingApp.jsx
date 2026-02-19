@@ -257,7 +257,10 @@ export default function ProspectingApp() {
   const [manualSearching, setManualSearching] = useState(false);
   const [manualGpvTier, setManualGpvTier] = useState(null);
   const [manualSaving, setManualSaving] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
   const manualSearchTimeout = useRef(null);
+  const addressSuggestionsTimeout = useRef(null);
 
   // Wrapper for handleSearch to clear state
   const wrappedHandleSearch = async (e) => {
@@ -2847,12 +2850,83 @@ export default function ProspectingApp() {
                     placeholder="Business Name" 
                     className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
                   />
-                  <input 
-                    value={manualSelected ? (manualSelected.address || '') : ''} 
-                    onChange={(e) => setManualSelected({...manualSelected, address: e.target.value})} 
-                    placeholder="Address" 
-                    className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
-                  />
+                  <div className="relative">
+                    <input 
+                      value={manualSelected ? (manualSelected.address || '') : ''} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setManualSelected({...manualSelected, address: val});
+                        
+                        // Debounced address suggestions
+                        if (addressSuggestionsTimeout.current) clearTimeout(addressSuggestionsTimeout.current);
+                        
+                        if (val.trim().length >= 3) {
+                          addressSuggestionsTimeout.current = setTimeout(async () => {
+                            try {
+                              const params = new URLSearchParams({
+                                query: val.trim(),
+                                ...(manualCityFilter.trim() && { city: manualCityFilter.trim() })
+                              });
+                              const url = `/api/places?${params}`;
+                              const res = await fetch(url);
+                              if (!res.ok) throw new Error('Failed to fetch suggestions');
+                              const data = await res.json();
+                              const results = data.results || [];
+                              setAddressSuggestions(results.map(r => ({
+                                address: r.address || '',
+                                name: r.name || '',
+                                lat: r.lat,
+                                lng: r.lng
+                              })));
+                              setShowAddressSuggestions(true);
+                            } catch (e) {
+                              console.error('Address suggestions error:', e);
+                              setAddressSuggestions([]);
+                            }
+                          }, 300);
+                        } else {
+                          setAddressSuggestions([]);
+                          setShowAddressSuggestions(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (addressSuggestions.length > 0) {
+                          setShowAddressSuggestions(true);
+                        }
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setShowAddressSuggestions(false), 200);
+                      }}
+                      placeholder="Address" 
+                      className="w-full bg-[#071126] border border-slate-700 px-3 py-2 rounded-xl text-[12px]" 
+                    />
+                    
+                    {/* Address Suggestions Dropdown */}
+                    {showAddressSuggestions && addressSuggestions.length > 0 && (
+                      <div className="absolute z-50 w-full bg-[#020617] border border-slate-700 rounded-xl shadow-lg max-h-48 overflow-y-auto mt-1">
+                        {addressSuggestions.map((suggestion, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              setManualSelected({
+                                ...manualSelected,
+                                address: suggestion.address,
+                                name: manualSelected.name || suggestion.name,
+                                lat: suggestion.lat,
+                                lng: suggestion.lng
+                              });
+                              setShowAddressSuggestions(false);
+                              setAddressSuggestions([]);
+                            }}
+                            className="p-3 border-b border-slate-800 last:border-0 cursor-pointer hover:bg-slate-900/50 transition-colors"
+                          >
+                            <div className="text-[11px] font-bold text-white truncate">{suggestion.address}</div>
+                            {suggestion.name && <div className="text-[10px] text-slate-400 truncate">{suggestion.name}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   <div className="mt-3">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">GPV Tier (Required)</div>
@@ -2873,8 +2947,92 @@ export default function ProspectingApp() {
                     </div>
                   </div>
 
-                  <div className="text-[10px] text-slate-400 mt-3">
-                    Click a search result to preview, select GPV tier, then use the Save button at the top to save the account.
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      onClick={async () => {
+                        if (!manualSelected || !manualSelected.name) {
+                          setError('Please enter a business name');
+                          return;
+                        }
+                        if (!manualGpvTier) {
+                          setError('Please select a GPV Tier');
+                          return;
+                        }
+
+                        const name = manualSelected.name.trim();
+                        const address = manualSelected.address?.trim() || '';
+
+                        let lat = manualSelected.lat;
+                        let lng = manualSelected.lng;
+
+                        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                          const pseudo = pseudoLatLng(name || address || Date.now());
+                          lat = pseudo.lat;
+                          lng = pseudo.lng;
+                        }
+
+                        setError('');
+                        let aiText = "";
+                        try {
+                          aiText = await fetchAiForInfo({ location_name: name, location_city: manualCityFilter || '', taxpayer_name: name }, { updateState: false });
+                        } catch (e) {
+                          console.error('AI fetch failed', e);
+                        }
+
+                        const payload = {
+                          name,
+                          address,
+                          lat,
+                          lng,
+                          notes: JSON.stringify({ manual: true, gpvTier: manualGpvTier, activeOpp: selectedActiveOpp, activeAccount: selectedActiveAccount, venueType: venueType, venueTypeLocked: venueTypeLocked, aiResponse: aiText || aiResponse || "" }),
+                        };
+
+                        try {
+                          const res = await fetch('/api/accounts', { 
+                            method: 'POST', 
+                            headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify(payload),
+                            credentials: 'include'
+                          });
+                          if (!res.ok) throw new Error('Save failed');
+                          const created = await res.json();
+                          await refreshSavedAccounts();
+                          setManualAddOpen(false);
+                          setManualQuery('');
+                          setManualResults([]);
+                          setManualSelected(null);
+                          setManualGpvTier(null);
+                          setSelectedGpvTier(manualGpvTier);
+                          setSelectedEstablishment({
+                            info: {
+                              id: created.id,
+                              location_name: created.name,
+                              location_address: created.address,
+                              lat: created.lat,
+                              lng: created.lng,
+                              notes: created.notes,
+                            },
+                            history: [],
+                          });
+                        } catch (err) {
+                          setError(err?.message || 'Could not create account.');
+                        }
+                      }}
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-[12px] font-black uppercase text-white transition-all"
+                    >
+                      Create Account
+                    </button>
+                    <button
+                      onClick={() => {
+                        setManualSelected(null);
+                        setManualQuery('');
+                        setManualCityFilter('');
+                        setManualGpvTier(null);
+                      }}
+                      className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-[10px] font-bold uppercase"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               </div>
@@ -4172,8 +4330,8 @@ export default function ProspectingApp() {
                 onToggleActiveAccount={toggleActiveAccount}
               />
 
-              {/* Notes (only for saved accounts) */}
-              {selectedEstablishment?.info?.id && (
+              {/* Notes (for saved accounts and selected NRO accounts) */}
+              {(selectedEstablishment?.info?.id || selectedEstablishment?.info?.location_name) && (
                 <ActivityLog
                   notesList={notesList}
                   currentNote={currentNote}
