@@ -1,4 +1,4 @@
-import { TrendingUp, Users, Target, Clock, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { TrendingUp, Users, Target, Clock, Calendar, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
 import { useState, useEffect } from "react";
 
 const ACTIVITY_TYPES = [
@@ -13,6 +13,24 @@ export default function PersonalMetrics({ data, onActivityClick }) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [activities, setActivities] = useState([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const copyNoteText = (text, noteId) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(noteId);
+      setTimeout(() => setCopiedId(null), 2000);
+    }).catch(() => {
+      // fallback copy method
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopiedId(noteId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
 
   // Helper to get date in CST
   const getTodayCST = () => {
@@ -201,22 +219,39 @@ export default function PersonalMetrics({ data, onActivityClick }) {
               return (
                 <div
                   key={activity.id}
-                  onClick={() => onActivityClick && onActivityClick(activity.account_id)}
-                  className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 cursor-pointer hover:bg-slate-700/50 transition-colors"
+                  className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 hover:bg-slate-700/50 transition-colors"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <div
-                      className="px-2 py-1 rounded-lg text-[9px] font-black uppercase"
-                      style={{ backgroundColor: activityTypeInfo.color + '20', color: activityTypeInfo.color }}
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="px-2 py-1 rounded-lg text-[9px] font-black uppercase"
+                        style={{ backgroundColor: activityTypeInfo.color + '20', color: activityTypeInfo.color }}
+                      >
+                        {activityTypeInfo.label}
+                      </div>
+                      <div className="text-slate-400 text-[10px] font-bold">
+                        {new Date(activity.created_at).toLocaleTimeString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => copyNoteText(activity.text, activity.id)}
+                      title="Copy note text"
+                      className="text-slate-400 hover:text-indigo-400 transition-colors p-1"
                     >
-                      {activityTypeInfo.label}
-                    </div>
-                    <div className="text-slate-400 text-[10px] font-bold">
-                      {new Date(activity.created_at).toLocaleTimeString()}
-                    </div>
+                      {copiedId === activity.id ? (
+                        <Check size={14} className="text-green-400" />
+                      ) : (
+                        <Copy size={14} />
+                      )}
+                    </button>
                   </div>
-                  <div className="text-slate-300 font-bold text-xs mb-1">{activity.account_name}</div>
-                  <div className="text-slate-400 text-[11px]">{activity.text}</div>
+                  <div 
+                    onClick={() => onActivityClick && onActivityClick(activity.account_id)}
+                    className="cursor-pointer"
+                  >
+                    <div className="text-slate-300 font-bold text-xs mb-1">{activity.account_name}</div>
+                    <div className="text-slate-400 text-[11px]">{activity.text}</div>
+                  </div>
                 </div>
               );
             })

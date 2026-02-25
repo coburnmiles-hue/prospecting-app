@@ -1285,6 +1285,48 @@ export default function ProspectingApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
+  // Auto-zoom to current location when map tab is opened
+  useEffect(() => {
+    if (viewMode !== "map") return;
+
+    // Wait for map to be fully initialized before attempting geolocation
+    const timeout = setTimeout(() => {
+      if (!mapInstance.current) {
+        console.log('Map still not ready');
+        return;
+      }
+
+      console.log('Attempting to get geolocation...');
+
+      // Get current location and zoom to it
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            console.log('Got position:', position.coords.latitude, position.coords.longitude);
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            
+            if (mapInstance.current && window.L) {
+              console.log('Setting view to:', lat, lng);
+              mapInstance.current.setView([lat, lng], 15);
+              console.log('View set successfully');
+            } else {
+              console.log('Map or L not available');
+            }
+          },
+          (err) => {
+            console.error('Geolocation error:', err);
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
+        );
+      } else {
+        console.log('Geolocation not supported');
+      }
+    }, 1500); // Wait 1.5 seconds for map to initialize
+
+    return () => clearTimeout(timeout);
+  }, [viewMode]);
+
   const updateMarkers = (shouldFitBounds = false) => {
     if (!mapInstance.current || !window.L) return;
     const L = window.L;
