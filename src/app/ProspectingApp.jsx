@@ -70,7 +70,7 @@ import {
 import { VENUE_TYPES, GPV_TIERS, BASE_URL, DATE_FIELD, TOTAL_FIELD, TEXAS_CENTER } from "../utils/constants";
 
 // Custom Hooks
-import { useSavedAccounts, useMetricsData } from "../hooks/useData";
+import { useSavedAccounts, useMetricsData, useCalculatedMetrics } from "../hooks/useData";
 import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
 
 
@@ -131,6 +131,7 @@ export default function ProspectingApp() {
   // Custom hooks for data fetching
   const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
   const { metricsData, metricsLoading } = useMetricsData();
+  const { metrics: calculatedMetrics, loading: calculatedLoading } = useCalculatedMetrics();
   
   // Search hook
   const {
@@ -193,6 +194,10 @@ export default function ProspectingApp() {
   const [selectedGpvTier, setSelectedGpvTier] = useState(null);
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
   const [selectedActiveAccount, setSelectedActiveAccount] = useState(false);
+  const [wonGpv, setWonGpv] = useState('');
+  const [wonArr, setWonArr] = useState('');
+  const [wonDateSigned, setWonDateSigned] = useState('');
+  const [isEditingWonValues, setIsEditingWonValues] = useState(false);
   const [venueTypeLocked, setVenueTypeLocked] = useState(false);
   const savingLockStateRef = useRef(false);
   const skipAiLookupRef = useRef(false);
@@ -397,6 +402,11 @@ export default function ProspectingApp() {
     // Clear transient selection state so new account starts with no GPV/opp/notes selected
     setSelectedGpvTier(null);
     setSelectedActiveOpp(false);
+    setSelectedActiveAccount(false);
+    setWonGpv('');
+    setWonArr('');
+    setWonDateSigned('');
+    setIsEditingWonValues(false);
     setNotesList([]);
     setVenueTypeLocked(false);
     setNotesOwner({ id: null, key: null });
@@ -651,6 +661,11 @@ export default function ProspectingApp() {
       // ensure UI state is cleared when no saved notes exist for this selection
       setSelectedGpvTier(null);
       setSelectedActiveOpp(false);
+      setSelectedActiveAccount(false);
+      setWonGpv('');
+      setWonArr('');
+      setWonDateSigned('');
+      setIsEditingWonValues(false);
       setNotesList([]);
       setVenueTypeLocked(false);
       setNotesOwner({ id: null, key: null });
@@ -660,10 +675,21 @@ export default function ProspectingApp() {
     // Try to parse notes directly from the saved row (covers rows saved with JSON notes)
     try {
       const parsed = parseSavedNotes(saved.notes);
-      // Always restore GPV tier, Active Opp flag, and venue type from saved payload if present
+      // Always restore GPV tier, Active Opp flag, Active Account, and venue type from saved payload if present
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
-        setSelectedActiveAccount(parsed?.activeAccount || false);
+      setSelectedActiveAccount(parsed?.activeAccount || false);
+      setWonGpv(parsed?.wonGpv || '');
+      setWonArr(parsed?.wonArr || '');
+      setWonDateSigned(parsed?.wonDateSigned || '');
+      // If there's saved won data, don't start in edit mode. If no saved data but activeAccount is on, enter edit mode
+      if (parsed?.wonGpv || parsed?.wonArr || parsed?.wonDateSigned) {
+        setIsEditingWonValues(false);
+      } else if (parsed?.activeAccount) {
+        setIsEditingWonValues(true);
+      } else {
+        setIsEditingWonValues(false);
+      }
       if (parsed?.venueType) {
         setVenueType(parsed.venueType);
       }
@@ -2595,7 +2621,13 @@ export default function ProspectingApp() {
       try {
         const parsed = parseSavedNotes(saved.notes);
         let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], activeOpp: parsed?.activeOpp ?? false };
-        notesObj.activeOpp = !!notesObj.activeOpp ? false : true;
+        const wasActive = !!notesObj.activeOpp;
+        notesObj.activeOpp = !wasActive;
+        
+        // Track timestamp when turning ON activeOpp
+        if (!wasActive && notesObj.activeOpp) {
+          notesObj.activeOppDate = new Date().toISOString();
+        }
 
         const res = await fetch(`/api/accounts?id=${saved.id}`, {
           method: "PATCH",
@@ -2629,7 +2661,14 @@ export default function ProspectingApp() {
 
       // Local-only toggle for unsaved account
       if (!saved || !saved.id) {
-        setSelectedActiveAccount((s) => !s);
+        setSelectedActiveAccount((s) => {
+          const newValue = !s;
+          // If turning ON activeAccount, enter edit mode
+          if (newValue) {
+            setIsEditingWonValues(true);
+          }
+          return newValue;
+        });
         setNotesOwner((o) => ({ ...o, key }));
         return;
       }
@@ -2637,7 +2676,13 @@ export default function ProspectingApp() {
       try {
         const parsed = parseSavedNotes(saved.notes);
         let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], activeAccount: parsed?.activeAccount ?? false };
-        notesObj.activeAccount = !!notesObj.activeAccount ? false : true;
+        const wasActive = !!notesObj.activeAccount;
+        notesObj.activeAccount = !wasActive;
+        
+        // Track timestamp when turning ON activeAccount
+        if (!wasActive && notesObj.activeAccount) {
+          notesObj.activeAccountDate = new Date().toISOString();
+        }
 
         const res = await fetch(`/api/accounts?id=${saved.id}`, {
           method: "PATCH",
@@ -2650,8 +2695,65 @@ export default function ProspectingApp() {
 
         setSelectedActiveAccount(notesObj.activeAccount || false);
         setNotesOwner({ id: saved.id, key: parsed.key || null });
+        
+        // If turning ON activeAccount and no saved won values yet, enter edit mode
+        if (notesObj.activeAccount && !notesObj.wonGpv && !notesObj.wonArr && !notesObj.wonDateSigned) {
+          setIsEditingWonValues(true);
+        }
+        // If turning OFF activeAccount, exit edit mode
+        if (!notesObj.activeAccount) {
+          setIsEditingWonValues(false);
+        }
       } catch (err) {
         setError(err?.message || "Could not toggle Active Account.");
+      }
+    };
+
+    // Save GPV and ARR values for active account
+    const saveWonValues = async () => {
+      if (!selectedEstablishment?.info) return;
+      if (!selectedActiveAccount) {
+        setError("Please activate this account before saving won values.");
+        return;
+      }
+
+      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+        try {
+          const parsed = parseSavedNotes(a.notes);
+          if (parsed?.key && parsed.key === key) return true;
+        } catch {}
+        return false;
+      });
+
+      if (!saved || !saved.id) {
+        setError("Please save this account first before adding won values.");
+        return;
+      }
+
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [] };
+        
+        // Save GPV, ARR, and date signed values
+        notesObj.wonGpv = wonGpv ? parseFloat(wonGpv) : 0;
+        notesObj.wonArr = wonArr ? parseFloat(wonArr) : 0;
+        notesObj.wonDateSigned = wonDateSigned || new Date().toISOString().split('T')[0]; // Use provided date or today
+
+        const res = await fetch(`/api/accounts?id=${saved.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error("Could not save won values");
+
+        await refreshSavedAccounts();
+        setIsEditingWonValues(false); // Exit edit mode after saving
+        setError(""); // Clear any previous errors on success
+      } catch (err) {
+        setError(err?.message || "Could not save won values.");
       }
     };
 
@@ -3912,17 +4014,18 @@ export default function ProspectingApp() {
           ) : viewMode === "metrics" ? (
             <div className="space-y-6">
               {/* Metrics Section */}
-              {metricsLoading ? (
+              {calculatedLoading ? (
                 <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
                   <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
                   <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
                   <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
-                    Fetching data from Google Sheets...
+                    Calculating from your activity data...
                   </p>
                 </div>
               ) : (
                 <PersonalMetrics 
-                data={metricsData} 
+                data={metricsData}
+                calculatedMetrics={calculatedMetrics} 
                 onActivityClick={async (accountId) => {
                   // Switch to saved view and select the account
                   setViewMode('saved');
@@ -4370,6 +4473,15 @@ export default function ProspectingApp() {
                 onToggleActiveOpp={toggleActiveOpp}
                 selectedActiveAccount={selectedActiveAccount}
                 onToggleActiveAccount={toggleActiveAccount}
+                wonGpv={wonGpv}
+                setWonGpv={setWonGpv}
+                wonArr={wonArr}
+                setWonArr={setWonArr}
+                wonDateSigned={wonDateSigned}
+                setWonDateSigned={setWonDateSigned}
+                isEditingWonValues={isEditingWonValues}
+                setIsEditingWonValues={setIsEditingWonValues}
+                onSaveWonValues={saveWonValues}
               />
 
               {/* Notes (for saved accounts and selected NRO accounts) */}

@@ -5,16 +5,11 @@ export default function AIIntelPanel({
   aiResponse,
   onRefresh
 }) {
-  console.log('Raw AI Response:', aiResponse);
-  
   // Parse the three sections from the response
   const parseSection = (text, sectionName) => {
     if (!text) {
-      console.log(`${sectionName}: No text provided`);
       return "Not available";
     }
-    
-    console.log(`Parsing ${sectionName} from:`, text.substring(0, 200));
     
     // Try to find the section with various patterns
     const patterns = [
@@ -30,12 +25,10 @@ export default function AIIntelPanel({
       const pattern = patterns[i];
       const match = text.match(pattern);
       if (match && match[1] && match[1].trim()) {
-        console.log(`${sectionName} matched with pattern ${i + 1}:`, match[1].trim().substring(0, 100));
         return match[1].trim();
       }
     }
     
-    console.log(`${sectionName}: No match found`);
     return "Not available";
   };
 

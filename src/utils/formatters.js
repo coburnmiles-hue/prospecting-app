@@ -49,6 +49,11 @@ export function parseSavedNotes(raw) {
       gpvTier: p?.gpvTier ?? null,
       activeOpp: p?.activeOpp ?? false,
       activeAccount: p?.activeAccount ?? false,
+      activeOppDate: p?.activeOppDate || null,
+      activeAccountDate: p?.activeAccountDate || null,
+      wonGpv: p?.wonGpv || null,
+      wonArr: p?.wonArr || null,
+      wonDateSigned: p?.wonDateSigned || null,
       venueType: p?.venueType || null,
       venueTypeLocked: p?.venueTypeLocked ?? false,
       aiResponse: p?.aiResponse || "",
@@ -58,7 +63,7 @@ export function parseSavedNotes(raw) {
     };
   } catch (e) {
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, activeAccount: false, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
+    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, activeAccount: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
   }
 }
 

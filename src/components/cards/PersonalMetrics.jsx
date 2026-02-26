@@ -1,4 +1,4 @@
-import { TrendingUp, Users, Target, Clock, Calendar, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
+import { Users, Target, Clock, Calendar, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
 import { useState, useEffect } from "react";
 
 const ACTIVITY_TYPES = [
@@ -9,7 +9,7 @@ const ACTIVITY_TYPES = [
   { value: "update", label: "Update", color: "#64748b" },
 ];
 
-export default function PersonalMetrics({ data, onActivityClick }) {
+export default function PersonalMetrics({ data, onActivityClick, calculatedMetrics }) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [activities, setActivities] = useState([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -263,73 +263,110 @@ export default function PersonalMetrics({ data, onActivityClick }) {
         </div>
       </div>
 
-      {/* Prospecting - full width */}
-      {data && (() => {
-        const rows = data.rawRows || [];
-        const safe = (r, c) => {
-          if (!rows[r]) return "";
-          return rows[r][c] || "";
-        };
+      {/* Prospecting Metrics - Calculated from App Data */}
+      {calculatedMetrics && (
+        <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month's Prospecting</h3>
+            <Target className="text-indigo-300" size={20} />
+          </div>
 
-        const prospectingMatrix = [1, 2].map((rIdx) => {
-          return [3, 4, 5, 6, 7].map((cIdx) => safe(rIdx, cIdx));
-        });
-
-        const walkInsPerOpp = { label: safe(1, 9), value: safe(2, 9) };
-        const wonValueMatrix = [11, 12].map((cIdx) => [safe(1, cIdx), safe(2, cIdx)]);
-
-        return (
-          <>
-            <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Months Prospecting</h3>
-                <Target className="text-indigo-300" size={20} />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
-                {prospectingMatrix[0].map((title, i) => {
-                  const value = prospectingMatrix[1]?.[i] || "-";
-                  return (
-                    <div key={`p-col-${i}`} className="bg-white/6 rounded-xl p-4 text-center flex flex-col items-center justify-center gap-1">
-                      <div className="text-xs md:text-sm font-semibold uppercase text-slate-300 tracking-wide">{(title || "").toString()}</div>
-                      <div className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-white mt-1">{value || "-"}</div>
-                    </div>
-                  );
-                })}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div className="bg-white/6 rounded-xl p-4 text-center flex flex-col items-center justify-center gap-1">
+              <div className="text-xs md:text-sm font-semibold uppercase text-slate-300 tracking-wide">Walk-Ins</div>
+              <div className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-white mt-1">{calculatedMetrics.walkIns}</div>
+            </div>
+            
+            <div className="bg-white/6 rounded-xl p-4 text-center flex flex-col items-center justify-center gap-1">
+              <div className="text-xs md:text-sm font-semibold uppercase text-slate-300 tracking-wide">Touches</div>
+              <div className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-white mt-1">{calculatedMetrics.touches}</div>
+            </div>
+            
+            <div className="bg-white/6 rounded-xl p-4 text-center flex flex-col items-center justify-center gap-1">
+              <div className="text-xs md:text-sm font-semibold uppercase text-slate-300 tracking-wide">Opps</div>
+              <div className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-white mt-1">{calculatedMetrics.opps}</div>
+            </div>
+            
+            <div className="bg-white/6 rounded-xl p-4 text-center flex flex-col items-center justify-center gap-1">
+              <div className="text-xs md:text-sm font-semibold uppercase text-slate-300 tracking-wide">Closed Won</div>
+              <div className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-white mt-1">{calculatedMetrics.closedWon}</div>
+            </div>
+            
+            <div className="bg-white/6 rounded-xl p-4 text-center flex flex-col items-center justify-center gap-1">
+              <div className="text-xs md:text-sm font-semibold uppercase text-slate-300 tracking-wide">Walk-Ins per Opp</div>
+              <div className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-white mt-1">
+                {calculatedMetrics.opps > 0 ? (calculatedMetrics.walkIns / calculatedMetrics.opps).toFixed(1) : '-'}
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
-            {/* Secondary metrics - two columns */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-gradient-to-br from-emerald-900 via-slate-900 to-slate-800 p-8 rounded-3xl border border-slate-700 shadow-xl flex flex-col justify-center items-center">
-                <div className="flex items-center gap-3 mb-3">
-                  <TrendingUp className="text-emerald-300" size={20} />
-                  <h3 className="text-xs md:text-sm font-black uppercase text-slate-300 tracking-wide">Walk-Ins Per Opp</h3>
-                </div>
+      {/* Won Accounts This Month */}
+      {calculatedMetrics && calculatedMetrics.wonAccounts && calculatedMetrics.wonAccounts.length > 0 && (
+        <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month's Won Value</h3>
+            <Users className="text-purple-300" size={20} />
+          </div>
 
-                <div className="text-4xl md:text-5xl font-extrabold text-white">{walkInsPerOpp.value || "-"}</div>
-                <div className="text-sm text-slate-400 mt-2">{walkInsPerOpp.label || ""}</div>
-              </div>
-
-              <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 p-8 rounded-3xl border border-slate-700 shadow-xl">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xs md:text-sm font-black uppercase text-slate-300 tracking-wide">This Months Won Value</h3>
-                  <Users className="text-purple-300" size={20} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                  {wonValueMatrix.map((row, rIdx) => (
-                    <div key={`wonrow-${rIdx}`} className="bg-white/6 rounded-xl p-4">
-                      <div className="text-xs text-slate-300">{row[0] || "-"}</div>
-                      <div className="text-2xl md:text-3xl font-extrabold text-white mt-2">{row[1] || "-"}</div>
+          {/* Won Accounts List */}
+          <div className="space-y-3 mb-4 max-h-60 overflow-y-auto custom-scroll">
+            {calculatedMetrics.wonAccounts.map((account) => (
+              <div
+                key={account.id}
+                onClick={() => onActivityClick && onActivityClick(account.id)}
+                className="bg-white/6 rounded-xl p-4 cursor-pointer hover:bg-white/10 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-bold text-slate-200">{account.name}</div>
+                  {account.dateSigned && (
+                    <div className="text-[9px] text-slate-400">
+                      {new Date(account.dateSigned).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </div>
-                  ))}
+                  )}
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[9px] text-slate-400 uppercase">GPV</div>
+                    <div className="text-base font-extrabold text-emerald-300">
+                      ${account.gpv.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-400 uppercase">ARR</div>
+                    <div className="text-base font-extrabold text-indigo-300">
+                      ${account.arr.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Totals */}
+          <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-600">
+            <div className="bg-emerald-900/30 rounded-xl p-4">
+              <div className="text-xs text-emerald-200 uppercase font-bold mb-1">Total GPV</div>
+              <div className="text-2xl md:text-3xl font-extrabold text-white">
+                ${calculatedMetrics.totalGpv.toLocaleString()}
               </div>
             </div>
-          </>
-        );
-      })()}
+            <div className="bg-indigo-900/30 rounded-xl p-4">
+              <div className="text-xs text-indigo-200 uppercase font-bold mb-1">Total ARR</div>
+              <div className="text-2xl md:text-3xl font-extrabold text-white">
+                ${calculatedMetrics.totalArr.toLocaleString()}
+              </div>
+            </div>
+            <div className="bg-purple-900/30 rounded-xl p-4">
+              <div className="text-xs text-purple-200 uppercase font-bold mb-1">Estimated Year 1 Earnings</div>
+              <div className="text-2xl md:text-3xl font-extrabold text-white">
+                ${Math.round(calculatedMetrics.totalArr * 0.265).toLocaleString()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
