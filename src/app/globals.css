@@ -117,3 +117,40 @@ body {
 .leaflet-tooltip-right:before {
   display: none !important;
 }
+
+/* Route planning marker feedback animations */
+.route-marker-added {
+  animation: route-add-pulse 0.3s ease-out !important;
+}
+
+.route-marker-removed {
+  animation: route-remove-pulse 0.3s ease-out !important;
+}
+
+@keyframes route-add-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.25);
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.4);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes route-remove-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.25);
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.4);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}

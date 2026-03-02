@@ -86,6 +86,13 @@ export function useCalculatedMetrics() {
         let closedWon = 0;
         let wonAccounts = [];
 
+        // All-time metrics
+        let allTimeWalkIns = 0;
+        let allTimeTouches = 0;
+        let allTimeOpps = 0;
+        let allTimeClosedWon = 0;
+        let allTimeWonAccounts = [];
+
         // Process each account
         accounts.forEach(account => {
           try {
@@ -140,6 +147,18 @@ export function useCalculatedMetrics() {
                 // skip invalid dates
               }
             }
+
+            // All-time: Count all active accounts (regardless of when signed)
+            if (notes?.activeAccount) {
+              allTimeClosedWon++;
+              allTimeWonAccounts.push({
+                id: account.id,
+                name: account.name,
+                gpv: notes.wonGpv || 0,
+                arr: notes.wonArr || 0,
+                dateSigned: notes.wonDateSigned,
+              });
+            }
           } catch (e) {
             // Skip invalid notes
           }
@@ -148,9 +167,13 @@ export function useCalculatedMetrics() {
         // Calculate walk-ins per opp
         const walkInsPerOpp = opps > 0 ? (walkIns / opps).toFixed(1) : '-';
         
-        // Calculate totals
+        // Calculate totals (this month)
         const totalGpv = wonAccounts.reduce((sum, acc) => sum + acc.gpv, 0);
         const totalArr = wonAccounts.reduce((sum, acc) => sum + acc.arr, 0);
+
+        // Calculate all-time totals
+        const allTimeTotalGpv = allTimeWonAccounts.reduce((sum, acc) => sum + acc.gpv, 0);
+        const allTimeTotalArr = allTimeWonAccounts.reduce((sum, acc) => sum + acc.arr, 0);
 
         setMetrics({
           walkIns,
@@ -160,7 +183,14 @@ export function useCalculatedMetrics() {
           walkInsPerOpp,
           wonAccounts,
           totalGpv,
-          totalArr
+          totalArr,
+          // All-time metrics
+          allTime: {
+            closedWon: allTimeClosedWon,
+            wonAccounts: allTimeWonAccounts,
+            totalGpv: allTimeTotalGpv,
+            totalArr: allTimeTotalArr,
+          }
         });
       } catch (err) {
         console.error("Failed to calculate metrics:", err);

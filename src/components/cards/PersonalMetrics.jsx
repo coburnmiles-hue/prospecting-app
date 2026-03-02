@@ -14,6 +14,7 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
   const [activities, setActivities] = useState([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [earningsView, setEarningsView] = useState('thisMonth'); // 'thisMonth' or 'allTime'
 
   const copyNoteText = (text, noteId) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -303,16 +304,57 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
       )}
 
       {/* Won Accounts This Month */}
-      {calculatedMetrics && calculatedMetrics.wonAccounts && calculatedMetrics.wonAccounts.length > 0 && (
+      {calculatedMetrics && (
         <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month's Won Value</h3>
-            <Users className="text-purple-300" size={20} />
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">
+              {earningsView === 'thisMonth' ? "This Month's" : "All Time"} Won Value
+            </h3>
+            <div className="flex items-center gap-3">
+              {/* Toggle Button */}
+              <div className="flex items-center bg-slate-800/50 rounded-xl p-1 border border-slate-700">
+                <button
+                  onClick={() => setEarningsView('thisMonth')}
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
+                    earningsView === 'thisMonth'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-slate-400 hover:text-slate-300'
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  onClick={() => setEarningsView('allTime')}
+                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
+                    earningsView === 'allTime'
+                      ? 'bg-indigo-600 text-white shadow-lg'
+                      : 'text-slate-400 hover:text-slate-300'
+                  }`}
+                >
+                  All Time
+                </button>
+              </div>
+              <Users className="text-purple-300" size={20} />
+            </div>
           </div>
 
           {/* Won Accounts List */}
-          <div className="space-y-3 mb-4 max-h-60 overflow-y-auto custom-scroll">
-            {calculatedMetrics.wonAccounts.map((account) => (
+          {(() => {
+            const displayWonAccounts = earningsView === 'thisMonth' 
+              ? (calculatedMetrics.wonAccounts || []) 
+              : (calculatedMetrics.allTime?.wonAccounts || []);
+            
+            if (displayWonAccounts.length === 0) {
+              return (
+                <div className="text-center py-8 text-slate-400 text-sm">
+                  No won accounts {earningsView === 'thisMonth' ? 'this month' : 'yet'}.
+                </div>
+              );
+            }
+            
+            return (
+              <div className="space-y-3 mb-4 max-h-60 overflow-y-auto custom-scroll">
+                {displayWonAccounts.map((account) => (
               <div
                 key={account.id}
                 onClick={() => onActivityClick && onActivityClick(account.id)}
@@ -343,28 +385,41 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
               </div>
             ))}
           </div>
+            );
+          })()}
 
           {/* Totals */}
-          <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-600">
-            <div className="bg-emerald-900/30 rounded-xl p-4">
-              <div className="text-xs text-emerald-200 uppercase font-bold mb-1">Total GPV</div>
-              <div className="text-2xl md:text-3xl font-extrabold text-white">
-                ${calculatedMetrics.totalGpv.toLocaleString()}
+          {(() => {
+            const displayTotalGpv = earningsView === 'thisMonth' 
+              ? (calculatedMetrics.totalGpv || 0) 
+              : (calculatedMetrics.allTime?.totalGpv || 0);
+            const displayTotalArr = earningsView === 'thisMonth' 
+              ? (calculatedMetrics.totalArr || 0) 
+              : (calculatedMetrics.allTime?.totalArr || 0);
+            
+            return (
+              <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-600">
+                <div className="bg-emerald-900/30 rounded-xl p-4">
+                  <div className="text-xs text-emerald-200 uppercase font-bold mb-1">Total GPV</div>
+                  <div className="text-2xl md:text-3xl font-extrabold text-white">
+                    ${displayTotalGpv.toLocaleString()}
+                  </div>
+                </div>
+                <div className="bg-indigo-900/30 rounded-xl p-4">
+                  <div className="text-xs text-indigo-200 uppercase font-bold mb-1">Total ARR</div>
+                  <div className="text-2xl md:text-3xl font-extrabold text-white">
+                    ${displayTotalArr.toLocaleString()}
+                  </div>
+                </div>
+                <div className="bg-purple-900/30 rounded-xl p-4">
+                  <div className="text-xs text-purple-200 uppercase font-bold mb-1">Estimated Year 1 Earnings</div>
+                  <div className="text-2xl md:text-3xl font-extrabold text-white">
+                    ${Math.round(displayTotalArr * 0.265).toLocaleString()}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="bg-indigo-900/30 rounded-xl p-4">
-              <div className="text-xs text-indigo-200 uppercase font-bold mb-1">Total ARR</div>
-              <div className="text-2xl md:text-3xl font-extrabold text-white">
-                ${calculatedMetrics.totalArr.toLocaleString()}
-              </div>
-            </div>
-            <div className="bg-purple-900/30 rounded-xl p-4">
-              <div className="text-xs text-purple-200 uppercase font-bold mb-1">Estimated Year 1 Earnings</div>
-              <div className="text-2xl md:text-3xl font-extrabold text-white">
-                ${Math.round(calculatedMetrics.totalArr * 0.265).toLocaleString()}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       )}
     </div>

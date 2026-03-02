@@ -1769,7 +1769,37 @@ export default function ProspectingApp() {
         // If in map route planning mode, add/remove from route instead of opening popup
         if (mapRoutePlanModeRef.current) {
           e.originalEvent?.preventDefault();
+          
+          // Close any open popups
+          marker.closePopup();
+          mapInstance.current.closePopup();
+          
           const existingIndex = mapRouteStops.findIndex(s => s.id === row.id);
+          
+          // Simple visual feedback - scale and color change
+          const markerEl = marker.getElement();
+          if (markerEl) {
+            const iconDiv = markerEl.querySelector('div');
+            if (iconDiv) {
+              // Remove any existing animation class
+              iconDiv.classList.remove('route-marker-added', 'route-marker-removed');
+              
+              if (existingIndex >= 0) {
+                // Removing - quick scale pulse
+                iconDiv.classList.add('route-marker-removed');
+                setTimeout(() => {
+                  if (iconDiv) iconDiv.classList.remove('route-marker-removed');
+                }, 300);
+              } else {
+                // Adding - quick scale pulse with checkmark
+                iconDiv.classList.add('route-marker-added');
+                setTimeout(() => {
+                  if (iconDiv) iconDiv.classList.remove('route-marker-added');
+                }, 300);
+              }
+            }
+          }
+          
           if (existingIndex >= 0) {
             // Remove from route
             setMapRouteStops(stops => stops.filter((_, i) => i !== existingIndex));
@@ -2095,6 +2125,11 @@ export default function ProspectingApp() {
 
     const onView = (e) => {
       try {
+        // Skip if in route planning mode - don't open details panel
+        if (mapRoutePlanModeRef.current) {
+          return;
+        }
+        
         const detail = e?.detail;
         const id = detail?.id;
         if (id != null) {
