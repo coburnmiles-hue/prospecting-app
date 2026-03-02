@@ -2801,8 +2801,9 @@ export default function ProspectingApp() {
             <Navigation className="text-white" size={28} />
           </div>
           <div>
-            <h1 className="text-4xl text-white tracking-tighter uppercase italic leading-none">
-              <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
+            <h1 className="text-4xl text-white tracking-tighter uppercase italic leading-none flex items-baseline gap-2">
+              <span><span className="font-black">Pocket</span> <span className="font-normal">Prospector</span></span>
+              <span className="text-xs font-normal text-slate-500 normal-case not-italic tracking-wider">v4.3</span>
             </h1>
           </div>
         </div>
