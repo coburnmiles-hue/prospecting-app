@@ -2795,24 +2795,24 @@ export default function ProspectingApp() {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
       {/* Header with Logout Button */}
-      <header className="max-w-6xl mx-auto mb-10 flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-3 rounded-2xl shadow-lg shadow-indigo-600/30">
-            <Navigation className="text-white" size={28} />
+      <header className="max-w-6xl mx-auto mb-10 flex justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+          <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-2 sm:p-3 rounded-2xl shadow-lg shadow-indigo-600/30 flex-shrink-0">
+            <Navigation className="text-white w-6 h-6 sm:w-7 sm:h-7" />
           </div>
-          <div>
-            <h1 className="text-4xl text-white tracking-tighter uppercase italic leading-none flex items-baseline gap-2">
-              <span><span className="font-black">Pocket</span> <span className="font-normal">Prospector</span></span>
-              <span className="text-xs font-normal text-slate-500 normal-case not-italic tracking-wider">v4.7</span>
+          <div className="min-w-0">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
+              <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v4.9</p>
           </div>
         </div>
         <button
           onClick={handleLogout}
-          className="flex items-center justify-center w-7 h-7 p-0 sm:w-auto sm:h-auto sm:gap-1.5 sm:px-2.5 sm:py-1.5 md:gap-2 md:px-4 md:py-2 rounded-md sm:rounded-xl text-xs md:text-sm font-bold text-red-400 hover:text-red-300 hover:bg-red-600/10 transition-all duration-200 border border-red-600/30 hover:border-red-500/50"
+          className="flex items-center justify-center w-8 h-8 sm:w-auto sm:h-auto sm:gap-1.5 sm:px-2.5 sm:py-1.5 md:gap-2 md:px-4 md:py-2 rounded-lg sm:rounded-xl text-xs md:text-sm font-bold text-red-400 hover:text-red-300 hover:bg-red-600/10 transition-all duration-200 border border-red-600/30 hover:border-red-500/50 flex-shrink-0"
           title="Logout"
         >
-          <svg className="w-3 h-3 sm:w-4 sm:h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 sm:w-4 sm:h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
           <span className="hidden sm:inline">Logout</span>

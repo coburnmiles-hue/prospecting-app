@@ -7,6 +7,7 @@ const ACTIVITY_TYPES = [
   { value: "text", label: "Text", color: "#8b5cf6" },
   { value: "email", label: "Email", color: "#f59e0b" },
   { value: "update", label: "Update", color: "#64748b" },
+  { value: "bdr-note", label: "BDR Note", color: "#ec4899" },
 ];
 
 export default function PersonalMetrics({ data, onActivityClick, calculatedMetrics }) {
@@ -14,7 +15,6 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
   const [activities, setActivities] = useState([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
-  const [earningsView, setEarningsView] = useState('thisMonth'); // 'thisMonth' or 'allTime'
 
   const copyNoteText = (text, noteId) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -307,47 +307,18 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
       {calculatedMetrics && (
         <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">
-              {earningsView === 'thisMonth' ? "This Month's" : "All Time"} Won Value
-            </h3>
-            <div className="flex items-center gap-3">
-              {/* Toggle Button */}
-              <div className="flex items-center bg-slate-800/50 rounded-xl p-1 border border-slate-700">
-                <button
-                  onClick={() => setEarningsView('thisMonth')}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
-                    earningsView === 'thisMonth'
-                      ? 'bg-indigo-600 text-white shadow-lg'
-                      : 'text-slate-400 hover:text-slate-300'
-                  }`}
-                >
-                  This Month
-                </button>
-                <button
-                  onClick={() => setEarningsView('allTime')}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${
-                    earningsView === 'allTime'
-                      ? 'bg-indigo-600 text-white shadow-lg'
-                      : 'text-slate-400 hover:text-slate-300'
-                  }`}
-                >
-                  All Time
-                </button>
-              </div>
-              <Users className="text-purple-300" size={20} />
-            </div>
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month's Won Value</h3>
+            <Users className="text-purple-300" size={20} />
           </div>
 
           {/* Won Accounts List */}
           {(() => {
-            const displayWonAccounts = earningsView === 'thisMonth' 
-              ? (calculatedMetrics.wonAccounts || []) 
-              : (calculatedMetrics.allTime?.wonAccounts || []);
+            const displayWonAccounts = calculatedMetrics.wonAccounts || [];
             
             if (displayWonAccounts.length === 0) {
               return (
                 <div className="text-center py-8 text-slate-400 text-sm">
-                  No won accounts {earningsView === 'thisMonth' ? 'this month' : 'yet'}.
+                  No won accounts this month.
                 </div>
               );
             }
@@ -390,12 +361,8 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
 
           {/* Totals */}
           {(() => {
-            const displayTotalGpv = earningsView === 'thisMonth' 
-              ? (calculatedMetrics.totalGpv || 0) 
-              : (calculatedMetrics.allTime?.totalGpv || 0);
-            const displayTotalArr = earningsView === 'thisMonth' 
-              ? (calculatedMetrics.totalArr || 0) 
-              : (calculatedMetrics.allTime?.totalArr || 0);
+            const displayTotalGpv = calculatedMetrics.totalGpv || 0;
+            const displayTotalArr = calculatedMetrics.totalArr || 0;
             
             return (
               <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-600">

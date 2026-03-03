@@ -6,6 +6,7 @@ const ACTIVITY_TYPES = [
   { value: "text", label: "Text", color: "#8b5cf6" },
   { value: "email", label: "Email", color: "#f59e0b" },
   { value: "update", label: "Update", color: "#64748b" },
+  { value: "bdr-note", label: "BDR Note", color: "#ec4899" },
 ];
 
 export default function ActivityLog({
