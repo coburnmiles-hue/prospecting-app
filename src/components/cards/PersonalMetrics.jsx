@@ -1,5 +1,6 @@
 import { Users, Target, Clock, Calendar, ChevronLeft, ChevronRight, Copy, Check } from "lucide-react";
 import { useState, useEffect } from "react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 
 const ACTIVITY_TYPES = [
   { value: "walk-in", label: "Walk-In", color: "#3b82f6" },
@@ -363,27 +364,34 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
           {(() => {
             const displayTotalGpv = calculatedMetrics.totalGpv || 0;
             const displayTotalArr = calculatedMetrics.totalArr || 0;
+            const displayYear1Earnings = Math.round(displayTotalArr * 0.265);
+            
+            const chartData = [
+              { name: "Total GPV", value: displayTotalGpv, fill: "#10b981" },
+              { name: "Total ARR", value: displayTotalArr, fill: "#6366f1" },
+              { name: "Year 1 Earnings", value: displayYear1Earnings, fill: "#a855f7" },
+            ];
+            
+            const formatCurrency = (value) => {
+              if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
+              if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
+              return `$${value}`;
+            };
             
             return (
-              <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-600">
-                <div className="bg-emerald-900/30 rounded-xl p-4">
-                  <div className="text-xs text-emerald-200 uppercase font-bold mb-1">Total GPV</div>
-                  <div className="text-2xl md:text-3xl font-extrabold text-white">
-                    ${displayTotalGpv.toLocaleString()}
-                  </div>
-                </div>
-                <div className="bg-indigo-900/30 rounded-xl p-4">
-                  <div className="text-xs text-indigo-200 uppercase font-bold mb-1">Total ARR</div>
-                  <div className="text-2xl md:text-3xl font-extrabold text-white">
-                    ${displayTotalArr.toLocaleString()}
-                  </div>
-                </div>
-                <div className="bg-purple-900/30 rounded-xl p-4">
-                  <div className="text-xs text-purple-200 uppercase font-bold mb-1">Estimated Year 1 Earnings</div>
-                  <div className="text-2xl md:text-3xl font-extrabold text-white">
-                    ${Math.round(displayTotalArr * 0.265).toLocaleString()}
-                  </div>
-                </div>
+              <div className="pt-4 border-t border-slate-600">
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 150, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis type="number" stroke="#64748b" tickFormatter={formatCurrency} tick={{ fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
+                    <RechartsTooltip 
+                      contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569", borderRadius: "8px", color: "#fff" }}
+                      formatter={(value) => `$${value.toLocaleString()}`}
+                    />
+                    <Bar dataKey="value" radius={8} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             );
           })()}

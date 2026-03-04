@@ -17,6 +17,8 @@ body {
 
 body {
   margin: 0;
+  background: linear-gradient(135deg, #0f1420 0%, #1a2847 100%);
+  min-height: 100vh;
 }
 
 /* Smooth fonts */
@@ -65,6 +67,15 @@ body {
 
 .border-glow-emerald {
   box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.15), inset 0 0 0 1px rgba(16, 185, 129, 0.1);
+}
+.leaflet-pane {
+  z-index: 99998 !important;
+}
+.leaflet-popup-pane {
+  z-index: 99999 !important;
+}
+.leaflet-popup {
+  z-index: 99999 !important;
 }
 .leaflet-popup-content-wrapper {
   background: #1e293b;

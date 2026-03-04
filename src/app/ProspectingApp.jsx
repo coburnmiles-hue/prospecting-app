@@ -1653,87 +1653,79 @@ export default function ProspectingApp() {
 
       // Check business hours status
       let hoursStatusHtml = '';
-      if (parsed?.businessHours?.periods && Array.isArray(parsed.businessHours.periods)) {
+      let todayHours = '';
+      
+      try {
         const now = new Date();
-        const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentDay = now.getDay();
         const currentHour = now.getHours();
         const currentMinute = now.getMinutes();
         const currentTimeInMinutes = currentHour * 60 + currentMinute;
         
-        // Find today's periods AND yesterday's periods (for overnight hours)
-        const yesterday = currentDay === 0 ? 6 : currentDay - 1;
-        const relevantPeriods = parsed.businessHours.periods.filter(period => {
-          const dayValue = period.open?.day !== undefined ? period.open.day : null;
-          return dayValue === currentDay || dayValue === yesterday;
-        });
-
-        let isOpen = false;
-        let opensWithinHour = false;
-        let nextOpenTime = null;
-
-        relevantPeriods.forEach(period => {
-          const periodDay = period.open?.day !== undefined ? period.open.day : null;
-          let openTime = 0;
-          let closeTime = 0;
-
-          // Parse open time
-          if (period.open?.time) {
-            const openStr = period.open.time.toString().padStart(4, '0');
-            openTime = parseInt(openStr.substring(0, 2)) * 60 + parseInt(openStr.substring(2, 4));
-          } else if (period.open?.hour !== undefined && period.open?.minute !== undefined) {
-            openTime = period.open.hour * 60 + period.open.minute;
+        // Extract today's hours display
+        if (parsed?.businessHours?.periods && Array.isArray(parsed.businessHours.periods)) {
+          const todayPeriods = parsed.businessHours.periods.filter(p => p.open?.day === currentDay);
+          
+          if (todayPeriods.length > 0) {
+            const hours = todayPeriods.map(p => {
+              // Use hour/minute properties instead of time
+              const oh = p.open?.hour;
+              const om = p.open?.minute;
+              const ch = p.close?.hour;
+              const cm = p.close?.minute;
+              
+              if (oh === undefined || om === undefined || ch === undefined || cm === undefined) return '';
+              
+              const openStr = om === 0 ? `${oh === 0 ? 12 : oh > 12 ? oh - 12 : oh}${oh >= 12 ? 'p' : 'a'}` : `${oh === 0 ? 12 : oh > 12 ? oh - 12 : oh}:${om.toString().padStart(2, '0')}${oh >= 12 ? 'p' : 'a'}`;
+              const closeStr = cm === 0 ? `${ch === 0 ? 12 : ch > 12 ? ch - 12 : ch}${ch >= 12 ? 'p' : 'a'}` : `${ch === 0 ? 12 : ch > 12 ? ch - 12 : ch}:${cm.toString().padStart(2, '0')}${ch >= 12 ? 'p' : 'a'}`;
+              
+              return `${openStr}-${closeStr}`;
+            }).filter(h => h);
+            
+            if (hours.length > 0) todayHours = ` • ${hours.join(', ')}`;
           }
-
-          // Parse close time
-          if (period.close?.time) {
-            const closeStr = period.close.time.toString().padStart(4, '0');
-            closeTime = parseInt(closeStr.substring(0, 2)) * 60 + parseInt(closeStr.substring(2, 4));
-          } else if (period.close?.hour !== undefined && period.close?.minute !== undefined) {
-            closeTime = period.close.hour * 60 + period.close.minute;
-          }
-
+          
           // Check if currently open
-          if (periodDay === currentDay) {
-            // Period starts today
-            if (closeTime > openTime) {
-              // Same day hours (e.g., 9:00 AM - 5:00 PM)
-              if (currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
+          const yesterday = currentDay === 0 ? 6 : currentDay - 1;
+          let isOpen = false;
+          let opensWithinHour = false;
+          let nextOpenTime = null;
+          
+          parsed.businessHours.periods.forEach(period => {
+            const pDay = period.open?.day;
+            if (pDay !== currentDay && pDay !== yesterday) return;
+            
+            // Use hour/minute properties
+            const openTime = (period.open?.hour || 0) * 60 + (period.open?.minute || 0);
+            const closeTime = (period.close?.hour || 0) * 60 + (period.close?.minute || 0);
+            
+            if (pDay === currentDay) {
+              if (closeTime > openTime && currentTimeInMinutes >= openTime && currentTimeInMinutes < closeTime) {
+                isOpen = true;
+              } else if (closeTime < openTime && currentTimeInMinutes >= openTime) {
                 isOpen = true;
               }
-            } else if (closeTime < openTime) {
-              // Overnight hours starting today (e.g., 10:00 PM - 2:00 AM)
-              if (currentTimeInMinutes >= openTime) {
-                isOpen = true;
+              
+              if (!isOpen && openTime > currentTimeInMinutes && openTime <= currentTimeInMinutes + 60) {
+                opensWithinHour = true;
+                nextOpenTime = openTime;
               }
+            } else if (pDay === yesterday && closeTime < openTime && currentTimeInMinutes < closeTime) {
+              isOpen = true;
             }
-          } else if (periodDay === yesterday) {
-            // Period started yesterday - check if still open from overnight
-            if (closeTime < openTime) {
-              // This was an overnight period, check if we're still in the closing time
-              if (currentTimeInMinutes < closeTime) {
-                isOpen = true;
-              }
-            }
+          });
+          
+          if (isOpen) {
+            hoursStatusHtml = `<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #10b981; font-size: 11px; font-weight: 800;">● OPEN NOW</span><span style="color: #94a3b8; font-size: 10px;">${todayHours}</span></div>`;
+          } else if (opensWithinHour && nextOpenTime) {
+            const minsUntil = (nextOpenTime - currentTimeInMinutes);
+            const hoursStr = Math.floor(minsUntil / 60) > 0 ? `${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m` : `${minsUntil % 60}m`;
+            hoursStatusHtml = `<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #eab308; font-size: 11px; font-weight: 800;">◐ OPENING SOON (${hoursStr})</span><span style="color: #94a3b8; font-size: 10px;">${todayHours}</span></div>`;
+          } else {
+            hoursStatusHtml = `<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #ef4444; font-size: 11px; font-weight: 800;">● CLOSED</span><span style="color: #94a3b8; font-size: 10px;">${todayHours}</span></div>`;
           }
-
-          // Check if opens within next hour
-          if (!isOpen && openTime > currentTimeInMinutes && openTime <= currentTimeInMinutes + 60) {
-            opensWithinHour = true;
-            nextOpenTime = openTime;
-          }
-        });
-
-        if (isOpen) {
-          hoursStatusHtml = '<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #10b981; font-size: 11px; font-weight: 800;">● OPEN NOW</span></div>';
-        } else if (opensWithinHour) {
-          const hoursUntilOpen = Math.floor((nextOpenTime - currentTimeInMinutes) / 60);
-          const minsUntilOpen = (nextOpenTime - currentTimeInMinutes) % 60;
-          const timeStr = hoursUntilOpen > 0 ? `${hoursUntilOpen}h ${minsUntilOpen}m` : `${minsUntilOpen}m`;
-          hoursStatusHtml = `<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #eab308; font-size: 11px; font-weight: 800;">◐ OPENING SOON (${timeStr})</span></div>`;
-        } else {
-          hoursStatusHtml = '<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><span style="color: #ef4444; font-size: 11px; font-weight: 800;">● CLOSED</span></div>';
         }
-      }
+      } catch (e) {}
 
       marker.bindPopup(`
         <div style="font-family: ui-sans-serif, system-ui; padding: 10px; min-width: 220px;">
@@ -2804,7 +2796,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v4.9</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.4</p>
           </div>
         </div>
         <button
