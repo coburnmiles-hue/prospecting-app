@@ -1,5 +1,17 @@
 import { useState, useEffect } from "react";
 
+async function safeJson(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return null;
+  }
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
 export function useSavedAccounts() {
   const [savedAccounts, setSavedAccounts] = useState([]);
 
@@ -8,7 +20,7 @@ export function useSavedAccounts() {
       try {
         const res = await fetch("/api/accounts", { cache: "no-store", credentials: 'include' });
         if (!res.ok) return;
-        const data = await res.json();
+        const data = await safeJson(res);
         setSavedAccounts(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("Failed to fetch saved accounts:", err);
@@ -21,7 +33,7 @@ export function useSavedAccounts() {
     try {
       const res = await fetch("/api/accounts", { cache: "no-store", credentials: 'include' });
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await safeJson(res);
       setSavedAccounts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Failed to refresh saved accounts:", err);
@@ -41,7 +53,7 @@ export function useMetricsData() {
       try {
         const res = await fetch("/api/sheets", { cache: "no-store", credentials: 'include' });
         if (!res.ok) return;
-        const data = await res.json();
+        const data = await safeJson(res);
         setMetricsData(data);
       } catch (err) {
         console.error("Failed to fetch metrics:", err);
@@ -69,7 +81,11 @@ export function useCalculatedMetrics() {
           setLoading(false);
           return;
         }
-        const accounts = await res.json();
+        const accounts = await safeJson(res);
+        if (!Array.isArray(accounts)) {
+          setMetrics(null);
+          return;
+        }
 
         // Get current month start and end dates in CST
         const now = new Date();

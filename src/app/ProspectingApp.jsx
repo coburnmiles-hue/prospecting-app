@@ -595,7 +595,15 @@ export default function ProspectingApp() {
       // For manual accounts, keep the account selected and load the saved data
       if (isManual) {
         // Find the newly saved account
-        const updatedAccounts = await fetch('/api/accounts', { credentials: 'include' }).then(r => r.json());
+        const updatedRes = await fetch('/api/accounts', { credentials: 'include' });
+        let updatedAccounts = [];
+        if (updatedRes.ok) {
+          const ct = updatedRes.headers.get('content-type') || '';
+          if (ct.toLowerCase().includes('application/json')) {
+            const parsed = await updatedRes.json().catch(() => []);
+            updatedAccounts = Array.isArray(parsed) ? parsed : [];
+          }
+        }
         const newlySaved = updatedAccounts.find(a => {
           const aName = (a.name || '').toLowerCase();
           const aAddr = (a.address || '').toLowerCase();
@@ -839,7 +847,16 @@ export default function ProspectingApp() {
 
       // refresh current gpv tier from saved row if present
       try {
-        const refreshedRow = (await fetch("/api/accounts", { cache: "no-store", credentials: 'include' }).then((r) => r.json())).find((r) => r.id === saved.id);
+        const refreshedRes = await fetch("/api/accounts", { cache: "no-store", credentials: 'include' });
+        let refreshedAccounts = [];
+        if (refreshedRes.ok) {
+          const ct = refreshedRes.headers.get('content-type') || '';
+          if (ct.toLowerCase().includes('application/json')) {
+            const parsed = await refreshedRes.json().catch(() => []);
+            refreshedAccounts = Array.isArray(parsed) ? parsed : [];
+          }
+        }
+        const refreshedRow = refreshedAccounts.find((r) => r.id === saved.id);
         if (refreshedRow) {
           const parsed = parseSavedNotes(refreshedRow.notes);
             if (parsed?.gpvTier !== selectedGpvTier) {
@@ -1159,7 +1176,7 @@ export default function ProspectingApp() {
     // Delay initialization to ensure DOM is ready
     const timer = setTimeout(initRouteMaps, 100);
     return () => clearTimeout(timer);
-  }, [viewMode, savedRoutes]);
+  }, [viewMode, savedRoutes, MAPBOX_KEY]);
 
   // ---------- Map setup ----------
 
@@ -1974,7 +1991,7 @@ export default function ProspectingApp() {
     };
 
     fetchHours();
-  }, [selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_name, selectedEstablishment?.info?.location_address]);
+  }, [selectedEstablishment?.info, selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_name, selectedEstablishment?.info?.location_address]);
 
   const searchMapAccounts = (searchTerm) => {
     if (!searchTerm || !mapInstance.current) return;
@@ -2104,7 +2121,7 @@ export default function ProspectingApp() {
     };
 
     fetchHours();
-  }, [selectedEstablishment?.info?.id]);
+  }, [selectedEstablishment?.info, selectedEstablishment?.info?.id, refreshSavedAccounts]);
 
   useEffect(() => {
     if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
@@ -2321,7 +2338,7 @@ export default function ProspectingApp() {
         }
       }
     }
-  }, [stats, selectedGpvTier, selectedEstablishment, savedAccounts, selectedActiveOpp, venueType]);
+  }, [stats, selectedGpvTier, selectedEstablishment, savedAccounts, selectedActiveOpp, venueType, refreshSavedAccounts]);
 
   // Persist venue type changes to saved account
   useEffect(() => {
@@ -2370,7 +2387,7 @@ export default function ProspectingApp() {
         });
       } catch {}
     }
-  }, [venueType, venueTypeLocked, selectedGpvTier, selectedActiveOpp]);
+  }, [venueType, venueTypeLocked, selectedGpvTier, selectedActiveOpp, refreshSavedAccounts, savedAccounts, selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_number, selectedEstablishment?.info?.taxpayer_number]);
 
   const filteredSavedAccounts = useMemo(() => {
     if (!savedSearchTerm.trim()) return savedAccounts;

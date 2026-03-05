@@ -63,6 +63,7 @@ export default function ActivityLog({
           onClick={onAddNote}
           className="absolute bottom-4 right-4 bg-indigo-600 text-white p-3 rounded-2xl shadow-xl transition-transform active:scale-95"
           title="Add note"
+          type="button"
         >
           <Plus size={20} />
         </button>
@@ -86,6 +87,7 @@ export default function ActivityLog({
                       onClick={() => onDeleteNote(n.id)}
                       title="Delete note"
                       className="absolute right-3 top-3 text-slate-400 hover:text-rose-400"
+                      type="button"
                     >
                       ×
                     </button>

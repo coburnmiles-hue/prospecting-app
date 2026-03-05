@@ -269,7 +269,7 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
       {calculatedMetrics && (
         <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month's Prospecting</h3>
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month&apos;s Prospecting</h3>
             <Target className="text-indigo-300" size={20} />
           </div>
 
@@ -308,7 +308,7 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
       {calculatedMetrics && (
         <div className="bg-gradient-to-br from-purple-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month's Won Value</h3>
+            <h3 className="text-sm md:text-base font-black uppercase text-slate-300 tracking-wide">This Month&apos;s Won Value</h3>
             <Users className="text-purple-300" size={20} />
           </div>
 
