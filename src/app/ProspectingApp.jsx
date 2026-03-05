@@ -2813,7 +2813,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.6</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.7</p>
           </div>
         </div>
         <button
