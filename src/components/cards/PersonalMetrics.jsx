@@ -380,7 +380,7 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
             
             return (
               <div className="pt-4 border-t border-slate-600">
-                <ResponsiveContainer width="100%" height={200}>
+                <ResponsiveContainer width="100%" height={200} minWidth={0} minHeight={200}>
                   <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 150, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                     <XAxis type="number" stroke="#64748b" tickFormatter={formatCurrency} tick={{ fontSize: 11 }} />
