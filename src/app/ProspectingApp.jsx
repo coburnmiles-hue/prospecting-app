@@ -1991,7 +1991,7 @@ export default function ProspectingApp() {
     };
 
     fetchHours();
-  }, [selectedEstablishment?.info, selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_name, selectedEstablishment?.info?.location_address]);
+  }, [selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_name, selectedEstablishment?.info?.location_address]);
 
   const searchMapAccounts = (searchTerm) => {
     if (!searchTerm || !mapInstance.current) return;
@@ -2121,7 +2121,7 @@ export default function ProspectingApp() {
     };
 
     fetchHours();
-  }, [selectedEstablishment?.info, selectedEstablishment?.info?.id, refreshSavedAccounts]);
+  }, [selectedEstablishment?.info?.id]);
 
   useEffect(() => {
     if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
@@ -2338,7 +2338,7 @@ export default function ProspectingApp() {
         }
       }
     }
-  }, [stats, selectedGpvTier, selectedEstablishment, savedAccounts, selectedActiveOpp, venueType, refreshSavedAccounts]);
+  }, [stats, selectedGpvTier, selectedEstablishment, savedAccounts, selectedActiveOpp, venueType]);
 
   // Persist venue type changes to saved account
   useEffect(() => {
@@ -2387,7 +2387,7 @@ export default function ProspectingApp() {
         });
       } catch {}
     }
-  }, [venueType, venueTypeLocked, selectedGpvTier, selectedActiveOpp, refreshSavedAccounts, savedAccounts, selectedEstablishment?.info?.id, selectedEstablishment?.info?.location_number, selectedEstablishment?.info?.taxpayer_number]);
+  }, [venueType, venueTypeLocked, selectedGpvTier, selectedActiveOpp]);
 
   const filteredSavedAccounts = useMemo(() => {
     if (!savedSearchTerm.trim()) return savedAccounts;
