@@ -2796,7 +2796,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.4</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.6</p>
           </div>
         </div>
         <button
@@ -4144,23 +4144,38 @@ export default function ProspectingApp() {
                                   {new Date(route.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                 </p>
                               </div>
-                              <button
-                                onClick={async () => {
-                                  if (confirm('Delete this route?')) {
-                                    try {
-                                      const response = await fetch(`/api/saved-routes?id=${route.id}`, { method: 'DELETE' });
-                                      if (response.ok) {
-                                        await fetchSavedRoutes();
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => {
+                                    // Load route into map edit mode
+                                    const routeAccountIds = (routeData.stops || routeData.accounts || []).map(a => a.id);
+                                    mapRoutePlanModeRef.current = true;
+                                    setSelectedIds(routeAccountIds);
+                                    setViewMode('map');
+                                  }}
+                                  className="text-indigo-400 hover:text-indigo-300 text-sm font-bold transition-colors"
+                                  title="Edit route on map"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm('Delete this route?')) {
+                                      try {
+                                        const response = await fetch(`/api/saved-routes?id=${route.id}`, { method: 'DELETE' });
+                                        if (response.ok) {
+                                          await fetchSavedRoutes();
+                                        }
+                                      } catch (error) {
+                                        console.error('Delete error:', error);
                                       }
-                                    } catch (error) {
-                                      console.error('Delete error:', error);
                                     }
-                                  }
-                                }}
-                                className="text-slate-400 hover:text-red-400 text-sm transition-colors"
-                              >
-                                ✕
-                              </button>
+                                  }}
+                                  className="text-slate-400 hover:text-red-400 text-sm transition-colors"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
                             {(routeData.calculatedRoute || routeData.distance) && (
                               <div className="flex items-center gap-4 mb-3">
