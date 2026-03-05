@@ -16,6 +16,23 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
   const [activities, setActivities] = useState([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const updateIsMobile = () => setIsMobile(mediaQuery.matches);
+    updateIsMobile();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updateIsMobile);
+      return () => mediaQuery.removeEventListener('change', updateIsMobile);
+    }
+
+    mediaQuery.addListener(updateIsMobile);
+    return () => mediaQuery.removeListener(updateIsMobile);
+  }, []);
 
   const copyNoteText = (text, noteId) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -367,9 +384,9 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
             const displayYear1Earnings = Math.round(displayTotalArr * 0.265);
             
             const chartData = [
-              { name: "Total GPV", value: displayTotalGpv, fill: "#10b981" },
-              { name: "Total ARR", value: displayTotalArr, fill: "#6366f1" },
-              { name: "Year 1 Earnings", value: displayYear1Earnings, fill: "#a855f7" },
+              { name: isMobile ? "GPV" : "Total GPV", value: displayTotalGpv, fill: "#10b981" },
+              { name: isMobile ? "ARR" : "Total ARR", value: displayTotalArr, fill: "#6366f1" },
+              { name: isMobile ? "Y1" : "Year 1 Earnings", value: displayYear1Earnings, fill: "#a855f7" },
             ];
             
             const formatCurrency = (value) => {
@@ -381,10 +398,10 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
             return (
               <div className="pt-4 border-t border-slate-600">
                 <ResponsiveContainer width="100%" height={200} minWidth={0} minHeight={200}>
-                  <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 150, bottom: 5 }}>
+                  <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: isMobile ? 10 : 30, left: isMobile ? 20 : 150, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis type="number" stroke="#64748b" tickFormatter={formatCurrency} tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
+                    <XAxis type="number" stroke="#64748b" tickFormatter={formatCurrency} tick={{ fontSize: isMobile ? 10 : 11 }} />
+                    <YAxis type="category" dataKey="name" stroke="#64748b" tick={{ fontSize: isMobile ? 10 : 12 }} width={isMobile ? 36 : 120} />
                     <RechartsTooltip 
                       contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569", borderRadius: "8px", color: "#fff" }}
                       formatter={(value) => `$${value.toLocaleString()}`}
