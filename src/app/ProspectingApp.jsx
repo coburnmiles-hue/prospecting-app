@@ -184,7 +184,6 @@ export default function ProspectingApp() {
   const [aiResponse, setAiResponse] = useState("");
 
   // Notes (client only in this version)
-  const [currentNote, setCurrentNote] = useState("");
   const [activityType, setActivityType] = useState("walk-in");
   const [notesList, setNotesList] = useState([]);
   const [notesExpanded, setNotesExpanded] = useState(false);
@@ -419,7 +418,6 @@ export default function ProspectingApp() {
     setError("");
     setAiResponse("");
     skipAiLookupRef.current = false;
-    setCurrentNote("");
     setSelectedEstablishment(null);
     // Clear transient selection state so new account starts with no GPV/opp/notes selected
     setSelectedGpvTier(null);
@@ -763,8 +761,9 @@ export default function ProspectingApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment, savedAccounts]);
 
-  const handleAddNote = async () => {
-    if (!currentNote.trim() || !selectedEstablishment?.info) return;
+  const handleAddNote = async (noteText) => {
+    const trimmedNote = (noteText || "").trim();
+    if (!trimmedNote || !selectedEstablishment?.info) return false;
 
     const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
 
@@ -845,7 +844,7 @@ export default function ProspectingApp() {
         saved = created;
       } catch (err) {
         setError(err?.message || "Could not save account for notes.");
-        return;
+        return false;
       }
     }
 
@@ -853,7 +852,7 @@ export default function ProspectingApp() {
       const res = await fetch(`/api/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: saved.id, text: currentNote, activity_type: activityType }),
+        body: JSON.stringify({ accountId: saved.id, text: trimmedNote, activity_type: activityType }),
         credentials: 'include'
       });
       
@@ -897,9 +896,10 @@ export default function ProspectingApp() {
       } catch {}
 
       await refreshSavedAccounts();
-      setCurrentNote("");
+      return true;
     } catch (err) {
       setError(err?.message || "Could not save note.");
+      return false;
     }
   };
 
@@ -4592,9 +4592,8 @@ export default function ProspectingApp() {
               {/* Notes (for saved accounts and selected NRO accounts) */}
               {(selectedEstablishment?.info?.id || selectedEstablishment?.info?.location_name) && (
                 <ActivityLog
+                  key={`${selectedEstablishment?.info?.id || ''}-${selectedEstablishment?.info?.taxpayer_number || ''}-${selectedEstablishment?.info?.location_number || ''}`}
                   notesList={notesList}
-                  currentNote={currentNote}
-                  setCurrentNote={setCurrentNote}
                   onAddNote={handleAddNote}
                   onDeleteNote={handleDeleteNote}
                   notesExpanded={notesExpanded}

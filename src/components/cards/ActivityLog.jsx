@@ -1,4 +1,5 @@
 import { MessageSquare, Plus, X } from "lucide-react";
+import { useState } from "react";
 
 const ACTIVITY_TYPES = [
   { value: "walk-in", label: "Walk-In", color: "#3b82f6" },
@@ -11,8 +12,6 @@ const ACTIVITY_TYPES = [
 
 export default function ActivityLog({
   notesList,
-  currentNote,
-  setCurrentNote,
   onAddNote,
   onDeleteNote,
   notesExpanded,
@@ -20,6 +19,15 @@ export default function ActivityLog({
   activityType,
   setActivityType
 }) {
+  const [noteDraft, setNoteDraft] = useState("");
+
+  const handleAdd = async () => {
+    const ok = await onAddNote(noteDraft);
+    if (ok) {
+      setNoteDraft("");
+    }
+  };
+
   return (
     <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 shadow-xl">
       <div className="flex items-center justify-between mb-6">
@@ -46,12 +54,12 @@ export default function ActivityLog({
         <textarea
           placeholder="Enter follow-up details..."
           className="w-full bg-[#0F172A] border border-slate-700 rounded-3xl p-6 text-base font-bold text-slate-200 outline-none min-h-[110px] resize-none"
-          value={currentNote}
-          onChange={(e) => setCurrentNote(e.target.value)}
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
         />
-        {currentNote && (
+        {noteDraft && (
           <button
-            onClick={() => setCurrentNote('')}
+            onClick={() => setNoteDraft('')}
             className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition-colors"
             type="button"
             title="Clear"
@@ -60,7 +68,7 @@ export default function ActivityLog({
           </button>
         )}
         <button
-          onClick={onAddNote}
+          onClick={handleAdd}
           className="absolute bottom-4 right-4 bg-indigo-600 text-white p-3 rounded-2xl shadow-xl transition-transform active:scale-95"
           title="Add note"
           type="button"
