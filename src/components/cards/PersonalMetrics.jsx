@@ -398,9 +398,9 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
             return (
               <div className="pt-4 border-t border-slate-600">
                 <ResponsiveContainer width="100%" height={200} minWidth={0} minHeight={200}>
-                  <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: isMobile ? 10 : 30, left: isMobile ? 20 : 150, bottom: 5 }}>
+                  <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: isMobile ? 2 : 8, left: isMobile ? 20 : 150, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis type="number" stroke="#64748b" tickFormatter={formatCurrency} tick={{ fontSize: isMobile ? 10 : 11 }} />
+                    <XAxis type="number" stroke="#64748b" domain={[0, 'dataMax']} tickFormatter={formatCurrency} tick={{ fontSize: isMobile ? 10 : 11 }} />
                     <YAxis type="category" dataKey="name" stroke="#64748b" tick={{ fontSize: isMobile ? 10 : 12 }} width={isMobile ? 36 : 120} />
                     <RechartsTooltip 
                       contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569", borderRadius: "8px", color: "#fff" }}

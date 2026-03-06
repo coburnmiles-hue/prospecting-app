@@ -1102,17 +1102,17 @@ export default function ProspectingApp() {
           const script = document.createElement("script");
           script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
           document.head.appendChild(script);
-          
-          // Wait for Leaflet to load
-          await new Promise((resolve) => {
-            const checkInterval = setInterval(() => {
-              if (window.L) {
-                clearInterval(checkInterval);
-                resolve();
-              }
-            }, 100);
-          });
         }
+
+        // Wait for Leaflet to load (even if script tag already existed)
+        await new Promise((resolve) => {
+          const checkInterval = setInterval(() => {
+            if (window.L) {
+              clearInterval(checkInterval);
+              resolve();
+            }
+          }, 100);
+        });
       }
 
       const L = window.L;
@@ -1120,13 +1120,22 @@ export default function ProspectingApp() {
 
       // Initialize map for each route
       savedRoutes.forEach((route) => {
-        const routeData = typeof route.route_data === 'string' ? JSON.parse(route.route_data) : route.route_data;
         const mapId = `route-map-${route.id}`;
         const mapElement = document.getElementById(mapId);
         
         if (!mapElement || mapElement._leaflet_id) return; // Skip if already initialized
 
         try {
+          let routeData = route.route_data;
+          if (typeof routeData === 'string') {
+            try {
+              routeData = JSON.parse(routeData);
+            } catch {
+              routeData = {};
+            }
+          }
+          routeData = routeData || {};
+
           const map = L.map(mapElement, {
             zoomControl: false,
             attributionControl: false,
@@ -1151,9 +1160,21 @@ export default function ProspectingApp() {
             }).addTo(map);
           }
 
+          const stops = Array.isArray(routeData.stops)
+            ? routeData.stops
+            : (Array.isArray(routeData.accounts) ? routeData.accounts : []);
+
+          const fallbackPolyline = stops
+            .map((stop) => [Number(stop?.lat), Number(stop?.lng)])
+            .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+
+          const displayPolyline = Array.isArray(routeData.polyline) && routeData.polyline.length > 0
+            ? routeData.polyline
+            : fallbackPolyline;
+
           // Draw route if available
-          if (routeData.polyline && routeData.polyline.length > 0) {
-            const routeLine = L.polyline(routeData.polyline, {
+          if (displayPolyline.length > 0) {
+            const routeLine = L.polyline(displayPolyline, {
               color: '#10b981',
               weight: 3,
               opacity: 0.9,
