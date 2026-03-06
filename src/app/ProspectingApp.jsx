@@ -34,7 +34,6 @@ import {
 
 // Recharts components used for charts
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
@@ -253,6 +252,8 @@ export default function ProspectingApp() {
   const [coordSaving, setCoordSaving] = useState(false);
   const [coordSaved, setCoordSaved] = useState(false);
   const [coordEditorOpen, setCoordEditorOpen] = useState(false);
+  const historicalChartRef = useRef(null);
+  const [historicalChartWidth, setHistoricalChartWidth] = useState(0);
   // Manual add account state
   const [manualAddOpen, setManualAddOpen] = useState(false);
   const [manualQuery, setManualQuery] = useState("");
@@ -282,6 +283,27 @@ export default function ProspectingApp() {
     setAiResponse("");
     await handleTopSearch(e);
   };
+
+  useEffect(() => {
+    const element = historicalChartRef.current;
+    if (!element) return;
+
+    const updateWidth = () => {
+      const nextWidth = Math.floor(element.getBoundingClientRect().width);
+      setHistoricalChartWidth(nextWidth > 0 ? nextWidth : 0);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => updateWidth());
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, [selectedEstablishment?.info?.id, viewMode]);
 
   // NRO Search handler - searches TABC License Information for new licenses
   const handleNroSearch = async (e) => {
@@ -4506,9 +4528,11 @@ export default function ProspectingApp() {
                     Historical Volume
                   </h3>
 
-                  <div className="h-[260px] min-h-[260px] w-full min-w-0 mt-2">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+                  <div ref={historicalChartRef} className="h-[260px] min-h-[260px] w-full min-w-0 mt-2">
+                    {historicalChartWidth > 0 && (
                       <BarChart
+                        width={historicalChartWidth}
+                        height={260}
                         data={selectedEstablishment.history || []}
                         margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
                       >
@@ -4541,7 +4565,7 @@ export default function ProspectingApp() {
                         <Bar dataKey="beer" stackId="a" fill="#10b981" stroke="#10b981" fillOpacity={1} />
                         <Bar dataKey="wine" stackId="a" fill="#ec4899" stroke="#ec4899" fillOpacity={1} />
                       </BarChart>
-                    </ResponsiveContainer>
+                    )}
                   </div>
                 </div>
               </div>
