@@ -10,7 +10,14 @@ const poppins = Poppins({
 export const metadata = {
   title: "Pocket Prospector",
   description: "Prospecting App",
-  icon: "/favicon.png",
+  icons: {
+    icon: [
+      { url: "/pp-favicon-v2.png", type: "image/png", sizes: "32x32" },
+      { url: "/icon.png", type: "image/png", sizes: "32x32" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", type: "image/png", sizes: "180x180" }],
+    shortcut: ["/pp-favicon-v2.png"],
+  },
   robots: {
     index: false,
     follow: false,
