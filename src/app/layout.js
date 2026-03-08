@@ -12,11 +12,12 @@ export const metadata = {
   description: "Prospecting App",
   icons: {
     icon: [
-      { url: "/pp-favicon-v2.png", type: "image/png", sizes: "32x32" },
+      { url: "/pp-favicon-v3.png", type: "image/png", sizes: "32x32" },
       { url: "/icon.png", type: "image/png", sizes: "32x32" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
     ],
     apple: [{ url: "/apple-touch-icon.png", type: "image/png", sizes: "180x180" }],
-    shortcut: ["/pp-favicon-v2.png"],
+    shortcut: ["/pp-favicon-v3.png"],
   },
   robots: {
     index: false,
