@@ -10,6 +10,7 @@ const poppins = Poppins({
 export const metadata = {
   title: "Pocket Prospector",
   description: "Prospecting App",
+  icon: "/favicon.png",
   robots: {
     index: false,
     follow: false,

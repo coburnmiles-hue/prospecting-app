@@ -304,7 +304,7 @@ export default function ProspectingApp() {
     return () => window.removeEventListener("resize", updateWidth);
   }, [selectedEstablishment?.info?.id, viewMode]);
 
-  // NRO Search handler - searches TABC License Information for new licenses
+  // NRO Search handler - searches TABC License Information for new licenses + Austin building permits
   const handleNroSearch = async (e) => {
     if (e) e.preventDefault();
     if (!nroSearchTerm.trim()) return;
@@ -319,7 +319,7 @@ export default function ProspectingApp() {
       fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
       const dateFilter = fourMonthsAgo.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-      // Now try with selected search type - use LIKE for partial matching
+      // Search 1: TABC License Information
       const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
       const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
       
@@ -336,27 +336,61 @@ export default function ProspectingApp() {
       const where = `${locationFilter} AND (${licenseFilter})`;
       const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
       
-      const url = `https://data.texas.gov/resource/7hf9-qc9f.json${query}`;
+      const tabcUrl = `https://data.texas.gov/resource/7hf9-qc9f.json${query}`;
       
-      const res = await fetch(url);
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('NRO Search error response:', errorText);
-        throw new Error(`NRO Search error (${res.status})`);
+      // Fetch TABC license data
+      const tabcRes = await fetch(tabcUrl);
+      if (!tabcRes.ok) {
+        const errorText = await tabcRes.text();
+        console.error('TABC Search error response:', errorText);
+        throw new Error(`TABC Search error (${tabcRes.status})`);
       }
       
-      const data = await res.json();
+      const tabcData = await tabcRes.json();
       
-      // Now filter by date in JavaScript since the API query isn't working
-      const filtered = data.filter(item => {
+      // Filter TABC data by date
+      const filteredTabc = tabcData.filter(item => {
         if (!item.original_issue_date) return false;
         const issueDate = new Date(item.original_issue_date);
         return issueDate > fourMonthsAgo;
       });
       
-      // Transform the data to match our display format and check for sales data
-      const transformedPromises = filtered.map(async (item) => {
+      // Search 2: Austin Building Permits (if searching in Austin)
+      let permitData = [];
+      const isAustinSearch = nroSearchType === 'city' && nroSearchTerm.toUpperCase().includes('AUSTIN');
+      
+      if (isAustinSearch) {
+        console.log('Austin search detected - fetching building permits...');
+        try {
+          // Query Austin building permits for restaurants issued in last 4 months
+          // Note: column is 'issue_date' not 'issued_date'
+          const permitWhere = `lower(description) like '%restaurant%' AND issue_date > '${dateFilter}'`;
+          const permitQuery = `?$where=${encodeURIComponent(permitWhere)}&$order=issue_date DESC&$limit=200`;
+          const permitUrl = `https://data.austintexas.gov/resource/3syk-w9eu.json${permitQuery}`;
+          
+          console.log('Permit API URL:', permitUrl);
+          
+          const permitRes = await fetch(permitUrl);
+          console.log('Permit API Response status:', permitRes.status);
+          
+          if (permitRes.ok) {
+            permitData = await permitRes.json();
+            console.log(`✓ Found ${permitData.length} Austin building permits for restaurants`);
+            console.log('Sample permit data:', permitData.length > 0 ? permitData[0] : 'none');
+          } else {
+            const errorText = await permitRes.text();
+            console.error('Permit API error response:', errorText);
+          }
+        } catch (err) {
+          console.error('Austin permit search error:', err);
+          // Don't fail the whole search if permits fail - just continue with TABC data
+        }
+      }
+      
+      // Transform TABC license data
+      const tabcTransformedPromises = filteredTabc.map(async (item) => {
         const transformed = {
+          source: 'TABC License',
           location_name: item.trade_name || "Unknown",
           location_address: item.address || "",
           location_city: item.city || "",
@@ -364,8 +398,8 @@ export default function ProspectingApp() {
           license_type: item.license_type || "",
           license_id: item.license_id || "",
           original_issue_date: item.original_issue_date || "",
-          taxpayer_number: item.license_id || null, // Use license_id as identifier
-          location_number: "1", // Placeholder
+          taxpayer_number: item.license_id || null,
+          location_number: "1",
           has_sales: false,
           total_receipts: 0,
         };
@@ -390,7 +424,6 @@ export default function ProspectingApp() {
               
               if (exactMatch.length > 0) {
                 transformed.has_sales = true;
-                // Calculate total from most recent record
                 const recent = exactMatch[0];
                 transformed.total_receipts = Number(recent.total_receipts || 0);
               }
@@ -403,8 +436,63 @@ export default function ProspectingApp() {
         return transformed;
       });
 
-      const transformedWithSales = await Promise.all(transformedPromises);
-      setNroResults(transformedWithSales);
+      // Transform Austin building permit data
+      const permitTransformedPromises = permitData.map(async (item) => {
+        const transformed = {
+          source: 'Austin Building Permit',
+          location_name: item.project_name || item.description || "Unknown Project",
+          location_address: item.original_address1 || item.address || "",
+          location_city: "AUSTIN",
+          location_zip: item.original_zip || item.zip || "",
+          permit_number: item.permit_num || item.permit_number || "",
+          issue_date: item.issue_date || "",
+          description: item.description || "",
+          work_class: item.work_class || "",
+          taxpayer_number: `PERMIT-${item.permit_num || item.permit_number || ''}`,
+          location_number: "1",
+          has_sales: false,
+          total_receipts: 0,
+        };
+
+        // Check for sales data by address since we may not have exact business name
+        try {
+          const searchAddress = (item.original_address1 || item.address || "").toUpperCase();
+          
+          if (searchAddress) {
+            // Try to find any business at this address
+            const where = `upper(location_address) LIKE '%${searchAddress.split(' ')[0]}%' AND upper(location_city) LIKE '%AUSTIN%'`;
+            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
+              `${DATE_FIELD} DESC`
+            )}&$limit=12`;
+
+            const salesRes = await fetch(`${BASE_URL}${query}`);
+            if (salesRes.ok) {
+              const salesData = await salesRes.json();
+              
+              if (salesData.length > 0) {
+                transformed.has_sales = true;
+                const recent = salesData[0];
+                transformed.total_receipts = Number(recent.total_receipts || 0);
+                // Update with actual business name if we found one
+                if (recent.location_name) {
+                  transformed.location_name = recent.location_name;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Error checking sales for permit', item.permit_num, err);
+        }
+
+        return transformed;
+      });
+
+      // Combine results from both sources
+      const tabcResults = await Promise.all(tabcTransformedPromises);
+      const permitResults = await Promise.all(permitTransformedPromises);
+      const allResults = [...tabcResults, ...permitResults];
+      
+      setNroResults(allResults);
     } catch (err) {
       console.error('NRO Search error:', err);
       setNroError(err?.message || "Could not search NRO data.");
@@ -3367,6 +3455,11 @@ export default function ProspectingApp() {
                             <div className="text-[11px] font-black uppercase text-white tracking-wider leading-tight">
                               {item.location_name}
                             </div>
+                            {item.source === 'Austin Building Permit' && (
+                              <span className="text-orange-400 font-black text-[8px] px-1.5 py-0.5 bg-orange-500/10 rounded border border-orange-500/30 whitespace-nowrap">
+                                PERMIT
+                              </span>
+                            )}
                             {item.has_sales ? (
                               <span className="text-emerald-400 font-black text-xs px-2 py-0.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30 whitespace-nowrap">
                                 {formatCurrency(item.total_receipts)}
@@ -3380,13 +3473,31 @@ export default function ProspectingApp() {
                           <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
                             {item.location_address ? `${item.location_address}, ` : ''}{item.location_city}, TX {item.location_zip}
                           </div>
-                          <div className="flex gap-3 mt-3">
-                            <div className="text-[9px] font-bold text-indigo-400">
-                              {item.license_type}
-                            </div>
-                            <div className="text-[9px] font-bold text-slate-400">
-                              Issued: {new Date(item.original_issue_date).toLocaleDateString()}
-                            </div>
+                          <div className="flex gap-3 mt-3 flex-wrap">
+                            {item.source === 'Austin Building Permit' ? (
+                              <>
+                                <div className="text-[9px] font-bold text-orange-400">
+                                  Permit #{item.permit_number}
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-400">
+                                  Issued: {new Date(item.issue_date).toLocaleDateString()}
+                                </div>
+                                {item.work_class && (
+                                  <div className="text-[9px] font-bold text-slate-500">
+                                    {item.work_class}
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-[9px] font-bold text-indigo-400">
+                                  {item.license_type}
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-400">
+                                  Issued: {new Date(item.original_issue_date).toLocaleDateString()}
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
