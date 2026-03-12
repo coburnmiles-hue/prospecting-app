@@ -217,9 +217,7 @@ export function useCalculatedMetrics() {
 
     calculateMetrics();
     
-    // Refresh every minute
-    const interval = setInterval(calculateMetrics, 60000);
-    return () => clearInterval(interval);
+    // No auto-refresh - user can manually refresh if needed
   }, []);
 
   return { metrics, loading };

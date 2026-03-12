@@ -17,6 +17,8 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [followUpAlerts, setFollowUpAlerts] = useState([]);
+  const [completingFollowupId, setCompletingFollowupId] = useState(null);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -85,6 +87,9 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
         const targetDate = formatDateCST(selectedDate);
         
         const activitiesForDate = [];
+        const followUpsDueSoon = [];
+        const now = new Date();
+        const weekAhead = new Date(now.getTime() + (7 * 24 * 60 * 60 * 1000));
         
         if (!Array.isArray(accounts)) {
           console.error('Accounts API returned non-array:', accounts);
@@ -108,8 +113,31 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
                       account_id: account.id
                     });
                   }
+
                 } catch (e) {
                   // skip invalid note date
+                }
+              });
+            }
+
+            if (notes?.followups && Array.isArray(notes.followups)) {
+              notes.followups.forEach((followup) => {
+                try {
+                  if (followup?.completed) return;
+                  const followUpDate = new Date(followup.follow_up_at);
+                  if (Number.isFinite(followUpDate.getTime()) && followUpDate >= now && followUpDate <= weekAhead) {
+                    const msUntil = followUpDate.getTime() - now.getTime();
+                    const daysUntil = Math.ceil(msUntil / (24 * 60 * 60 * 1000));
+                    followUpsDueSoon.push({
+                      ...followup,
+                      account_name: account.name,
+                      account_id: account.id,
+                      follow_up_at: followup.follow_up_at,
+                      days_until: daysUntil,
+                    });
+                  }
+                } catch (e) {
+                  // skip invalid follow-up date
                 }
               });
             }
@@ -121,10 +149,13 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
         }
         // Sort by most recent first
         activitiesForDate.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        followUpsDueSoon.sort((a, b) => new Date(a.follow_up_at) - new Date(b.follow_up_at));
         setActivities(activitiesForDate);
+        setFollowUpAlerts(followUpsDueSoon);
       } catch (err) {
         console.error('Failed to fetch activities:', err);
         setActivities([]);
+        setFollowUpAlerts([]);
       }
     };
 
@@ -158,6 +189,34 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
   const goToToday = () => {
     setSelectedDate(getTodayCST());
   };
+
+  const markFollowupComplete = async (alert) => {
+    if (!alert?.account_id || !alert?.id) return;
+    setCompletingFollowupId(alert.id);
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          accountId: alert.account_id,
+          followupId: alert.id,
+          complete: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to complete follow-up');
+      }
+
+      setFollowUpAlerts((prev) => prev.filter((item) => Number(item.id) !== Number(alert.id)));
+    } catch (err) {
+      console.error('Failed to mark follow-up complete:', err);
+    } finally {
+      setCompletingFollowupId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Today's Activity */}
@@ -277,6 +336,60 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
           ) : (
             <div className="text-center py-8 text-slate-500 text-sm">
               No activities logged for this date.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Alerts: Follow-ups Due Within 7 Days */}
+      <div className="bg-gradient-to-br from-amber-900/40 via-slate-900 to-slate-900 p-6 rounded-3xl border border-amber-700/40 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm md:text-base font-black uppercase text-amber-200 tracking-wide">Alerts</h3>
+          <div className="px-3 py-1 bg-amber-900/40 rounded-full border border-amber-700/40 text-xs font-black text-amber-200">
+            {followUpAlerts.length} Due This Week
+          </div>
+        </div>
+
+        <div className="space-y-2 max-h-56 overflow-y-auto custom-scroll">
+          {followUpAlerts.length > 0 ? (
+            followUpAlerts.map((alert) => {
+              const followUpDate = new Date(alert.follow_up_at);
+              const daysUntil = Number.isFinite(Number(alert.days_until)) ? Number(alert.days_until) : 0;
+
+              return (
+                <div
+                  key={`alert-${alert.id}-${alert.account_id}`}
+                  onClick={() => onActivityClick && onActivityClick(alert.account_id)}
+                  className="bg-slate-800/60 border border-amber-700/30 rounded-2xl p-4 cursor-pointer hover:bg-slate-700/60 transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-2 gap-3">
+                    <div className="text-slate-200 font-bold text-xs truncate">{alert.account_name}</div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-1 text-[10px] font-black uppercase text-emerald-300 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={false}
+                          disabled={completingFollowupId === alert.id}
+                          onChange={() => markFollowupComplete(alert)}
+                          className="accent-emerald-500"
+                        />
+                        Done
+                      </label>
+                      <div className="text-[10px] font-black uppercase text-amber-300 whitespace-nowrap">
+                        {daysUntil <= 0 ? 'Today' : `${daysUntil} day${daysUntil === 1 ? '' : 's'}`}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-slate-400 text-[11px] mb-1">{alert.follow_up_note || alert.text}</div>
+                  <div className="text-amber-200 text-[10px] font-bold uppercase tracking-wide">
+                    Follow-up: {followUpDate.toLocaleString()}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-8 text-slate-400 text-sm">
+              No follow-up alerts due in the next 7 days.
             </div>
           )}
         </div>

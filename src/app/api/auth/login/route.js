@@ -5,8 +5,9 @@ import { NextResponse } from 'next/server';
 export async function POST(request) {
   try {
     const { username, password } = await request.json();
+    const normalizedUsername = typeof username === 'string' ? username.trim().toLowerCase() : '';
 
-    if (!username || !password) {
+    if (!normalizedUsername || !password) {
       return NextResponse.json(
         { error: 'Username and password required' },
         { status: 400 }
@@ -15,7 +16,7 @@ export async function POST(request) {
 
     // Find user by username
     const user = await sql`
-      SELECT id, password_hash FROM users WHERE username = ${username}
+      SELECT id, password_hash FROM users WHERE LOWER(username) = ${normalizedUsername}
     `;
 
     if (user.rows.length === 0) {

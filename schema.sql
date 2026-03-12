@@ -35,3 +35,4 @@ CREATE TABLE IF NOT EXISTS saved_routes (
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_saved_routes_user_id ON saved_routes(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower_unique ON users ((LOWER(username)));

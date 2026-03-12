@@ -186,6 +186,7 @@ export default function ProspectingApp() {
   // Notes (client only in this version)
   const [activityType, setActivityType] = useState("walk-in");
   const [notesList, setNotesList] = useState([]);
+  const [followupsList, setFollowupsList] = useState([]);
   const [notesExpanded, setNotesExpanded] = useState(false);
   // notesOwner tracks which account the notesList belongs to: { id?: number|null, key?: string }
   const [notesOwner, setNotesOwner] = useState({ id: null, key: null });
@@ -219,6 +220,7 @@ export default function ProspectingApp() {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef({});
+  const restaurantMarkersRef = useRef([]);
   const userLocationLayerRef = useRef(null);
   const LABEL_ZOOM_THRESHOLD = 13;
   const [legendOpen, setLegendOpen] = useState(true);
@@ -227,10 +229,15 @@ export default function ProspectingApp() {
   const [mapSearch, setMapSearch] = useState("");
   const [mapSearchSuggestions, setMapSearchSuggestions] = useState([]);
   const [showMapSuggestions, setShowMapSuggestions] = useState(false);
+  const [restaurantSearchMode, setRestaurantSearchMode] = useState(false);
+  const [restaurantSearchQuery, setRestaurantSearchQuery] = useState("");
+  const [restaurantMarkers, setRestaurantMarkers] = useState([]);
+  const [searchingRestaurants, setSearchingRestaurants] = useState(false);
   
   // GPV Tier visibility
   const [visibleTiers, setVisibleTiers] = useState(new Set(GPV_TIERS.map(t => t.id)));
   const [visibleActiveAccounts, setVisibleActiveAccounts] = useState(true);
+  const [showSavedPins, setShowSavedPins] = useState(true);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
   const [showNroOnly, setShowNroOnly] = useState(false);
@@ -516,6 +523,7 @@ export default function ProspectingApp() {
     setWonDateSigned('');
     setIsEditingWonValues(false);
     setNotesList([]);
+    setFollowupsList([]);
     setVenueTypeLocked(false);
     setNotesOwner({ id: null, key: null });
 
@@ -783,6 +791,7 @@ export default function ProspectingApp() {
       setWonDateSigned('');
       setIsEditingWonValues(false);
       setNotesList([]);
+      setFollowupsList([]);
       setVenueTypeLocked(false);
       setNotesOwner({ id: null, key: null });
       return;
@@ -815,12 +824,14 @@ export default function ProspectingApp() {
       }
       // Set notes and owner, even if empty
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
       setNotesOwner({ id: saved.id, key: parsed.key || null });
       return;
     } catch {}
 
     // Fallback only if parsing completely failed - just set empty notes without resetting other state
     setNotesList([]);
+    setFollowupsList([]);
     setNotesOwner({ id: saved.id, key: null });
   };
 
@@ -940,7 +951,12 @@ export default function ProspectingApp() {
       const res = await fetch(`/api/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: saved.id, text: trimmedNote, activity_type: activityType }),
+        body: JSON.stringify({
+          accountId: saved.id,
+          text: trimmedNote,
+          activity_type: activityType,
+          entry_type: 'activity',
+        }),
         credentials: 'include'
       });
       
@@ -949,6 +965,7 @@ export default function ProspectingApp() {
       const body = await res.json();
       
       setNotesList(Array.isArray(body.notes) ? body.notes : []);
+      setFollowupsList(Array.isArray(body.followups) ? body.followups : followupsList);
       setNotesOwner({ id: saved.id, key: null });
       
       // Reset activity type to default after adding note
@@ -987,6 +1004,54 @@ export default function ProspectingApp() {
       return true;
     } catch (err) {
       setError(err?.message || "Could not save note.");
+      return false;
+    }
+  };
+
+  const handleAddFollowup = async (followUpAt, followUpNote) => {
+    const trimmedNote = (followUpNote || "").trim();
+    if (!trimmedNote || !followUpAt || !selectedEstablishment?.info) return false;
+
+    const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+    let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+      if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+      try {
+        const parsed = parseSavedNotes(a.notes);
+        if (parsed?.key && parsed.key === key) return true;
+      } catch {}
+      return false;
+    });
+
+    if (!saved || !saved.id) {
+      return false;
+    }
+
+    try {
+      const res = await fetch(`/api/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: saved.id,
+          text: trimmedNote,
+          activity_type: activityType,
+          entry_type: 'followup',
+          follow_up_at: followUpAt,
+          follow_up_note: trimmedNote,
+        }),
+        credentials: 'include'
+      });
+
+      if (!res.ok) throw new Error("Follow-up save failed");
+
+      const body = await res.json();
+      setNotesList(Array.isArray(body.notes) ? body.notes : notesList);
+      setFollowupsList(Array.isArray(body.followups) ? body.followups : []);
+      setNotesOwner({ id: saved.id, key: null });
+      await refreshSavedAccounts();
+      return true;
+    } catch (err) {
+      setError(err?.message || "Could not save follow-up.");
       return false;
     }
   };
@@ -1391,7 +1456,12 @@ export default function ProspectingApp() {
             const scale = Math.max(0.5, Math.min(1, (15 - z) / 8)); // Scale from 0.5 to 1
             const newSize = Math.round(baseSize * scale);
             
-            Object.values(markersRef.current || {}).forEach((m) => {
+            const allMarkers = [
+              ...Object.values(markersRef.current || {}),
+              ...(restaurantMarkersRef.current || []),
+            ];
+
+            allMarkers.forEach((m) => {
               try {
                 if (!m) return;
                 // Update tooltip visibility
@@ -1489,7 +1559,12 @@ export default function ProspectingApp() {
             }
           },
           (err) => {
-            console.error('Geolocation error:', err);
+            const errorMessages = {
+              1: 'Permission denied - enable location access in browser settings',
+              2: 'Position unavailable - location services may be unavailable',
+              3: 'Request timeout - geolocation took too long'
+            };
+            console.error('Geolocation error:', errorMessages[err.code] || err.message);
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
@@ -1520,6 +1595,10 @@ export default function ProspectingApp() {
       const pseudo = pseudoLatLng(seed);
       return { ...row, lat: pseudo.lat, lng: pseudo.lng };
     });
+
+    if (!showSavedPins) {
+      return;
+    }
 
     // Track coordinates to detect duplicates and apply offset
     const coordsCount = new Map();
@@ -2161,6 +2240,134 @@ export default function ProspectingApp() {
     }
   };
 
+  const clearRestaurantMarkers = () => {
+    (restaurantMarkersRef.current || []).forEach((marker) => {
+      try {
+        if (marker) marker.remove();
+      } catch (e) {}
+    });
+    restaurantMarkersRef.current = [];
+    setRestaurantMarkers([]);
+  };
+
+  const searchNearbyRestaurants = async (lat, lng, placeType = 'restaurant') => {
+    if (!lat || !lng || !mapInstance.current || !window.L) {
+      console.warn('Invalid search parameters:', { lat, lng, mapReady: !!mapInstance.current, lReady: !!window.L });
+      return;
+    }
+    
+    setSearchingRestaurants(true);
+    console.log(`Searching for ${placeType}s near ${lat}, ${lng}`);
+    try {
+      const response = await fetch(
+        `/api/nearby-places?lat=${lat}&lng=${lng}&radius=5000&type=${placeType}`,
+        { credentials: 'include' }
+      );
+      
+      if (!response.ok) {
+        try {
+          const errorData = await response.json();
+          console.error('Restaurant search failed:', errorData.error || `HTTP ${response.status}`);
+        } catch (e) {
+          console.error('Restaurant search failed:', `HTTP ${response.status}`);
+        }
+        setSearchingRestaurants(false);
+        return;
+      }
+      
+      const data = await response.json();
+      if (!data.results || data.results.length === 0) {
+        console.log('No restaurants found');
+        clearRestaurantMarkers();
+        return;
+      }
+      
+      const L = window.L;
+      
+      // Clear previous restaurant markers
+      clearRestaurantMarkers();
+      
+      // Add new restaurant markers
+      const newMarkers = data.results.map(place => {
+        // Check if this place is already saved
+        const isSaved = savedAccounts.some(
+          acc => acc.name?.toLowerCase() === place.name.toLowerCase()
+        );
+        
+        if (isSaved) return null; // Skip saved accounts
+        
+        try {
+          const restaurantIcon = L.divIcon({
+            className: 'restaurant-icon',
+            html: `<div style="
+              background-color: #f97316;
+              border: 2px solid white;
+              border-radius: 50%;
+              width: 24px;
+              height: 24px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 12px;
+              font-weight: bold;
+              color: white;
+              box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+            ">🍽️</div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+            popupAnchor: [0, -12],
+          });
+          
+          const marker = L.marker([place.lat, place.lng], {
+            icon: restaurantIcon,
+            title: place.name,
+          });
+          marker._prospectPlaceId = place.placeId;
+
+          try {
+            marker.bindTooltip((place.name || "").toString(), {
+              permanent: true,
+              direction: 'bottom',
+              className: 'pin-label',
+              offset: [0, 10],
+            });
+
+            const z = mapInstance.current.getZoom();
+            if (z >= LABEL_ZOOM_THRESHOLD) marker.openTooltip(); else marker.closeTooltip();
+          } catch (e) {}
+          
+          const popupContent = `
+            <div style="padding: 8px; min-width: 150px;">
+              <h3 style="margin: 0 0 8px 0; font-weight: bold; font-size: 13px;">${place.name}</h3>
+              <p style="margin: 0 0 6px 0; font-size: 12px; color: #666;">${place.address}</p>
+              ${place.rating ? `<p style="margin: 0 0 6px 0; font-size: 12px;">⭐ ${place.rating.toFixed(1)}</p>` : ''}
+              ${place.isOpen !== undefined ? `<p style="margin: 0; font-size: 12px; color: ${place.isOpen ? '#10b981' : '#ef4444'};">${place.isOpen ? '🟢 Open' : '🔴 Closed'}</p>` : ''}
+              <button onclick="window.dispatchEvent(new CustomEvent('prospect:saveRestaurant',{detail:{name:${JSON.stringify(place.name || '')},address:${JSON.stringify(place.address || '')},lat:${Number(place.lat)},lng:${Number(place.lng)},placeId:${JSON.stringify(place.placeId || '')},types:${JSON.stringify(Array.isArray(place.types) ? place.types : [])},rating:${place.rating != null ? Number(place.rating) : 'null'},isOpen:${place.isOpen === true ? 'true' : place.isOpen === false ? 'false' : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#ea580c;color:white;padding:8px;border-radius:8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #fb923c;margin-top:8px;">
+                Save Account
+              </button>
+            </div>
+          `;
+          
+          marker.bindPopup(popupContent);
+          marker.addTo(mapInstance.current);
+          
+          return marker;
+        } catch (e) {
+          console.error('Error creating marker:', e);
+          return null;
+        }
+      }).filter(m => m !== null);
+      
+      restaurantMarkersRef.current = newMarkers;
+      setRestaurantMarkers(newMarkers);
+      console.log(`Found ${newMarkers.length} new restaurants to display`);
+    } catch (error) {
+      console.error('Restaurant search error:', error?.message || String(error));
+    } finally {
+      setSearchingRestaurants(false);
+    }
+  };
+
   // Fetch business hours when selectedEstablishment changes
   useEffect(() => {
     const fetchHours = async () => {
@@ -2257,7 +2464,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showActiveOnly, showUnvisitedOnly, showNroOnly, showOpenOnly, customFilterActive]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showOpenOnly, customFilterActive]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -2335,11 +2542,89 @@ export default function ProspectingApp() {
       }
     };
 
+    const onSaveRestaurant = async (e) => {
+      try {
+        const detail = e?.detail || {};
+        const name = (detail.name || '').toString().trim();
+        const address = (detail.address || '').toString().trim();
+        const lat = Number(detail.lat);
+        const lng = Number(detail.lng);
+
+        if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return;
+        }
+
+        const normalizedName = name.toLowerCase();
+        const normalizedAddress = address.toLowerCase();
+        const exists = savedAccounts.some((account) => {
+          const accountName = (account?.name || '').toString().trim().toLowerCase();
+          const accountAddress = (account?.address || '').toString().trim().toLowerCase();
+          return accountName === normalizedName && accountAddress === normalizedAddress;
+        });
+
+        if (exists) {
+          alert('This account is already saved.');
+          return;
+        }
+
+        const notesPayload = JSON.stringify({
+          source: 'google_places_restaurant_search',
+          placeId: detail.placeId || null,
+          placeTypes: Array.isArray(detail.types) ? detail.types : [],
+          placeRating: Number.isFinite(Number(detail.rating)) ? Number(detail.rating) : null,
+          placeOpenNow: detail.isOpen === true ? true : detail.isOpen === false ? false : null,
+        });
+
+        const saveRes = await fetch('/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name,
+            address,
+            lat,
+            lng,
+            notes: notesPayload,
+          }),
+        });
+
+        if (!saveRes.ok) {
+          let message = 'Failed to save account.';
+          try {
+            const errJson = await saveRes.json();
+            if (errJson?.error) message = errJson.error;
+          } catch {}
+          alert(message);
+          return;
+        }
+
+        await refreshSavedAccounts();
+
+        const placeId = (detail.placeId || '').toString();
+        const nextRestaurantMarkers = (restaurantMarkersRef.current || []).filter((marker) => {
+          const markerPlaceId = (marker?._prospectPlaceId || '').toString();
+          const shouldRemove = placeId && markerPlaceId === placeId;
+          if (shouldRemove) {
+            try { marker.remove(); } catch {}
+            return false;
+          }
+          return true;
+        });
+
+        restaurantMarkersRef.current = nextRestaurantMarkers;
+        setRestaurantMarkers(nextRestaurantMarkers);
+      } catch (err) {
+        console.error('saveRestaurant handler failed', err);
+      }
+    };
+
     window.addEventListener('prospect:viewDetails', onView);
     window.addEventListener('prospect:removePin', onRemove);
+    window.addEventListener('prospect:saveRestaurant', onSaveRestaurant);
     return () => {
       window.removeEventListener('prospect:viewDetails', onView);
       window.removeEventListener('prospect:removePin', onRemove);
+      window.removeEventListener('prospect:saveRestaurant', onSaveRestaurant);
     };
   }, [setViewMode, setSavedSubView, savedAccounts, refreshSavedAccounts, selectedEstablishment, setSelectedEstablishment]);
 
@@ -2552,6 +2837,7 @@ export default function ProspectingApp() {
       }
       setVenueTypeLocked(parsed?.venueTypeLocked || false);
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
       setNotesOwner({ id: data.id, key: parsed.key || null });
       
       // Restore AI response FIRST for all saved accounts
@@ -2644,6 +2930,7 @@ export default function ProspectingApp() {
             setNotesList([]);
             setNotesOwner({ id: data.id, key: parsed.key || null });
           }
+          setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
           if (parsed?.venueType) {
@@ -2761,6 +3048,7 @@ export default function ProspectingApp() {
             if (selectedEstablishment?.info?.id === data.id) {
               setSelectedEstablishment(null);
               setNotesList([]);
+              setFollowupsList([]);
             }
           } catch (err) {
             setError(err?.message || 'Could not delete account.');
@@ -2944,7 +3232,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.7</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.15</p>
           </div>
         </div>
         <button
@@ -3538,11 +3826,22 @@ export default function ProspectingApp() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                   <input
                     type="text"
-                    placeholder="Search accounts..."
-                    value={mapSearch}
-                    onChange={(e) => handleMapSearchInput(e.target.value)}
+                    placeholder={restaurantSearchMode ? "Search for restaurants, bars, or cafes..." : "Search accounts..."}
+                    value={restaurantSearchMode ? restaurantSearchQuery : mapSearch}
+                    onChange={(e) => {
+                      if (restaurantSearchMode) {
+                        setRestaurantSearchQuery(e.target.value);
+                      } else {
+                        handleMapSearchInput(e.target.value);
+                      }
+                    }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && restaurantSearchMode) {
+                        if (mapInstance.current) {
+                          const center = mapInstance.current.getCenter();
+                          searchNearbyRestaurants(center.lat, center.lng, 'restaurant');
+                        }
+                      } else if (e.key === 'Enter' && !restaurantSearchMode) {
                         searchMapAccounts(mapSearch);
                       } else if (e.key === 'Escape') {
                         setShowMapSuggestions(false);
@@ -3553,7 +3852,7 @@ export default function ProspectingApp() {
                   />
                   
                   {/* Suggestions dropdown */}
-                  {showMapSuggestions && mapSearchSuggestions.length > 0 && (
+                  {!restaurantSearchMode && showMapSuggestions && mapSearchSuggestions.length > 0 && (
                     <div className="absolute top-full mt-2 left-0 right-0 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto">
                       {mapSearchSuggestions.map((account) => {
                         const parsed = (() => {
@@ -3608,9 +3907,65 @@ export default function ProspectingApp() {
                     </div>
                   )}
                 </div>
+                <button
+                  onClick={() => {
+                    setRestaurantSearchMode(!restaurantSearchMode);
+                    // Clean up restaurant markers
+                    clearRestaurantMarkers();
+                    setRestaurantSearchQuery('');
+                    setMapSearch('');
+                  }}
+                  className={`px-3 py-2 rounded-xl border text-[8px] font-black uppercase flex items-center gap-2 shadow-xl whitespace-nowrap transition-colors ${
+                    restaurantSearchMode
+                      ? 'bg-orange-900/40 border-orange-600 text-orange-300'
+                      : 'bg-slate-900/90 border-slate-700 text-slate-300'
+                  } backdrop-blur-md pointer-events-auto`}
+                >
+                  🍽️ {restaurantSearchMode ? 'RESTAURANT SEARCH' : 'FIND RESTAURANTS'}
+                </button>
+                {restaurantSearchMode && (
+                  <div className="flex gap-2 pointer-events-auto">
+                    <button
+                      onClick={() => {
+                        if (mapInstance.current) {
+                          const center = mapInstance.current.getCenter();
+                          searchNearbyRestaurants(center.lat, center.lng, 'restaurant');
+                        }
+                      }}
+                      disabled={searchingRestaurants}
+                      className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
+                    >
+                      {searchingRestaurants ? '⏳' : '🍽️'} Restaurants
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (mapInstance.current) {
+                          const center = mapInstance.current.getCenter();
+                          searchNearbyRestaurants(center.lat, center.lng, 'bar');
+                        }
+                      }}
+                      disabled={searchingRestaurants}
+                      className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
+                    >
+                      {searchingRestaurants ? '⏳' : '🍸'} Bars
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (mapInstance.current) {
+                          const center = mapInstance.current.getCenter();
+                          searchNearbyRestaurants(center.lat, center.lng, 'cafe');
+                        }
+                      }}
+                      disabled={searchingRestaurants}
+                      className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
+                    >
+                      {searchingRestaurants ? '⏳' : '☕'} Cafes
+                    </button>
+                  </div>
+                )}
                 <div className="px-3 py-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2 shadow-xl">
                   <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
-                  {savedAccounts.length} PINS
+                  {restaurantSearchMode ? `${restaurantMarkers.length} RESTAURANTS` : `${savedAccounts.length} PINS`}
                 </div>
               </div>
 
@@ -3684,6 +4039,15 @@ export default function ProspectingApp() {
 
                   {/* Filter Buttons */}
                   <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => setShowSavedPins(v => !v)}
+                      title={showSavedPins ? "Hide all saved pins" : "Show all saved pins"}
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showSavedPins ? 'bg-slate-800/70 hover:bg-slate-700 border-slate-700' : 'bg-rose-500 text-white border-rose-500'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>{showSavedPins ? 'Hide All' : 'Show All'}</span>
+                    </button>
+
                     <button
                       onClick={() => setShowNroOnly(v => !v)}
                       title="Show NRO accounts only"
@@ -4250,6 +4614,7 @@ export default function ProspectingApp() {
                       
                       // Load notes list
                       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+                      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
                       setNotesOwner({ id: account.id, key: parsed.key || null });
                       
                       setSelectedEstablishment({
@@ -4705,7 +5070,9 @@ export default function ProspectingApp() {
                 <ActivityLog
                   key={`${selectedEstablishment?.info?.id || ''}-${selectedEstablishment?.info?.taxpayer_number || ''}-${selectedEstablishment?.info?.location_number || ''}`}
                   notesList={notesList}
+                  followupsList={followupsList}
                   onAddNote={handleAddNote}
+                  onAddFollowup={handleAddFollowup}
                   onDeleteNote={handleDeleteNote}
                   notesExpanded={notesExpanded}
                   setNotesExpanded={setNotesExpanded}

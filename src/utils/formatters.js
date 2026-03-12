@@ -45,6 +45,7 @@ export function parseSavedNotes(raw) {
     return {
       key: (p?.key || p?.key?.toString() || "").replace(/^KEY:/, "") || (p?.key ? p.key : undefined),
       notes: Array.isArray(p?.notes) ? p.notes : [],
+      followups: Array.isArray(p?.followups) ? p.followups : [],
       history: Array.isArray(p?.history) ? p.history : [],
       gpvTier: p?.gpvTier ?? null,
       activeOpp: p?.activeOpp ?? false,
@@ -63,7 +64,7 @@ export function parseSavedNotes(raw) {
     };
   } catch (e) {
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], history: [], activeOpp: false, activeAccount: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
+    return { key: m ? m[1] : undefined, notes: [], followups: [], history: [], activeOpp: false, activeAccount: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
   }
 }
 

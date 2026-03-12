@@ -5,8 +5,9 @@ import { NextResponse } from 'next/server';
 export async function POST(request) {
   try {
     const { username, password } = await request.json();
+    const normalizedUsername = typeof username === 'string' ? username.trim().toLowerCase() : '';
 
-    if (!username || !password) {
+    if (!normalizedUsername || !password) {
       return NextResponse.json(
         { error: 'Username and password required' },
         { status: 400 }
@@ -15,7 +16,7 @@ export async function POST(request) {
 
     // Check if user already exists
     const existingUser = await sql`
-      SELECT id FROM users WHERE username = ${username}
+      SELECT id FROM users WHERE LOWER(username) = ${normalizedUsername}
     `;
 
     if (existingUser.rows.length > 0) {
@@ -31,7 +32,7 @@ export async function POST(request) {
     // Create new user
     const result = await sql`
       INSERT INTO users (username, password_hash)
-      VALUES (${username}, ${hashedPassword})
+      VALUES (${normalizedUsername}, ${hashedPassword})
       RETURNING id
     `;
 
