@@ -57,6 +57,7 @@ export function useSearch() {
     cityFilter,
     setCityFilter,
     results,
+    setResults,
     loading,
     error,
     setError,
@@ -94,7 +95,7 @@ export function useTopLeaders() {
         `&$where=${encodeURIComponent(`${loc} AND ${DATE_FIELD} > '${dateString}'`)}` +
         `&$group=location_name, location_address, location_city, location_zip, taxpayer_name, taxpayer_number, location_number` +
         `&$order=${encodeURIComponent("annual_sales DESC")}` +
-        `&$limit=50`;
+        `&$limit=300`;
 
       const res = await fetch(`${BASE_URL}${query}`);
       if (!res.ok) throw new Error(`Texas data error (${res.status})`);

@@ -166,7 +166,9 @@ export default function ProspectingApp() {
   // Combine loading and error states for backward compatibility
   const [localLoading, setLoading] = useState(false);
   const loading = searchLoading || topLoading || localLoading || nroLoading;
-  const error = searchError || topError || nroError;
+  // Always coerce error to string to prevent "Objects are not valid as React child" error
+  const errorRaw = searchError || topError || nroError;
+  const error = typeof errorRaw === 'string' ? errorRaw : (errorRaw && errorRaw?.message ? errorRaw.message : errorRaw ? JSON.stringify(errorRaw) : '');
   const setError = (err) => {
     setSearchError(err);
     setTopError(err);
@@ -175,6 +177,11 @@ export default function ProspectingApp() {
 
   const [savedSearchTerm, setSavedSearchTerm] = useState("");
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
+  const [topViewMode, setTopViewMode] = useState("list"); // list | map
+  const topMapRef = useRef(null);
+  const topMapInstance = useRef(null);
+  const topMapMarkersRef = useRef([]); // [{marker, row}]
+  const savedAccountsRef = useRef([]);
 
   const [venueType, setVenueType] = useState("casual_dining");
   const [customFoodPct, setCustomFoodPct] = useState("");
@@ -1575,6 +1582,253 @@ export default function ProspectingApp() {
 
     return () => clearTimeout(timeout);
   }, [viewMode]);
+
+  // Top tab map mode for leader pins
+  useEffect(() => {
+    if (viewMode !== "top" || topViewMode !== "map") return;
+    if (!topMapRef.current) return;
+
+    const setupMap = async () => {
+      if (!window.L) {
+        if (!document.querySelector('link[href*="leaflet.css"]')) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+          document.head.appendChild(link);
+        }
+        if (!document.querySelector('script[src*="leaflet.js"]')) {
+          const script = document.createElement("script");
+          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+          document.head.appendChild(script);
+        }
+        await new Promise((resolve) => {
+          const interval = setInterval(() => {
+            if (window.L) {
+              clearInterval(interval);
+              resolve();
+            }
+          }, 100);
+        });
+      }
+
+      const L = window.L;
+      if (!L || !topMapRef.current) return;
+
+      if (topMapInstance.current) {
+        topMapInstance.current.remove();
+      }
+      topMapMarkersRef.current.forEach((m) => m.remove());
+      topMapMarkersRef.current = [];
+
+      topMapInstance.current = L.map(topMapRef.current, {
+        zoomControl: true,
+        attributionControl: false,
+      }).setView(TEXAS_CENTER, 7);
+
+      if (MAPBOX_KEY) {
+        L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+          tileSize: 512,
+          zoomOffset: -1,
+          maxZoom: 22,
+        }).addTo(topMapInstance.current);
+      } else {
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 }).addTo(topMapInstance.current);
+      }
+
+      const bounds = L.latLngBounds([]);
+      const accounts = Array.isArray(topAccounts) ? topAccounts : [];
+      const pinnedRows = [];
+
+      const geocodeAddress = async (address) => {
+        if (!address) return null;
+        try {
+          const res = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`);
+          const data = await res.json();
+          if (res.ok && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+            return { lat: Number(data.lat), lng: Number(data.lng) };
+          }
+        } catch (e) {
+          console.warn('Top map geocode failed', e);
+        }
+        return null;
+      };
+
+      for (const row of accounts) {
+        let lat = Number(row.lat);
+        let lng = Number(row.lng);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          const addressParts = [row.location_address, row.location_city, row.location_zip, 'TX'];
+          const fullAddress = addressParts.filter((p) => p).join(', ');
+          const coords = await geocodeAddress(fullAddress);
+          if (coords) {
+            lat = coords.lat;
+            lng = coords.lng;
+          }
+        }
+
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          pinnedRows.push({ ...row, lat, lng });
+        }
+      }
+
+      pinnedRows.forEach((row) => {
+
+        const annualSales = Number(row.annual_sales || row.total_receipts || 0);
+        const monthlySales = Math.round(annualSales / 12);
+        const tierColor = annualSales >= 1000000 ? '#f59e0b' : annualSales >= 500000 ? '#f97316' : annualSales >= 250000 ? '#fb7185' : '#60a5fa';
+
+        const alreadySaved = (Array.isArray(savedAccountsRef.current) ? savedAccountsRef.current : []).some((saved) => {
+          if (!saved) return false;
+          if (saved.id && row.id && saved.id === row.id) return true;
+          if (saved.location_name && row.location_name && saved.location_name.toLowerCase() === row.location_name.toLowerCase()) return true;
+          if (saved.location_address && row.location_address && saved.location_address.toLowerCase() === row.location_address.toLowerCase()) return true;
+          // fallback geo match by coordinates
+          if (saved.lat && saved.lng && row.lat && row.lng) {
+            const dlat = Math.abs(Number(saved.lat) - Number(row.lat));
+            const dlng = Math.abs(Number(saved.lng) - Number(row.lng));
+            if (dlat < 0.0007 && dlng < 0.0007) return true;
+          }
+          return false;
+        });
+
+        let markerIcon;
+        if (alreadySaved) {
+          // Green pin with white checkmark
+          markerIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="width:26px;height:26px;border-radius:999px;background:#10b981;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(16,185,129,0.18);">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="10" cy="10" r="10" fill="#10b981"/>
+                <path d="M6 10.5l2.5 2.5 5-5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 26],
+            popupAnchor: [0, -24],
+          });
+        } else {
+          // Default colored pin
+          markerIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="width:26px;height:26px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(0,0,0,0.35);">
+              <div style="width:10px;height:10px;border-radius:999px;background:#fff"></div>
+            </div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 26],
+            popupAnchor: [0, -24],
+          });
+        }
+
+        const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(topMapInstance.current);
+
+        const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.location_address || row.location_name || '')}`;
+        const displayName = (row.location_name || row.taxpayer_name || 'Account').toString();
+        const displayAddress = (row.location_address || row.location_city || '').toString();
+
+        const label = displayName;
+        marker.bindTooltip(label, {
+          permanent: true,
+          direction: 'bottom',
+          className: 'pin-label',
+          offset: [0, 10],
+        });
+
+        marker.on('click', () => {
+          analyze({
+            location_name: row.location_name || row.taxpayer_name || '',
+            location_address: row.location_address || '',
+            location_city: row.location_city || '',
+            location_zip: row.location_zip || '',
+            taxpayer_number: row.taxpayer_number || '',
+            location_number: row.location_number || '',
+            id: row.id || null,
+            tier: row.tier || null,
+            annual_sales: row.annual_sales || row.total_receipts || 0,
+            avg_monthly_volume: monthlySales,
+            lat: row.lat,
+            lng: row.lng,
+          });
+        });
+
+        topMapMarkersRef.current.push({ marker, row });
+        bounds.extend([row.lat, row.lng]);
+      });
+
+      topMapInstance.current.on('zoomend', () => {
+        const z = topMapInstance.current.getZoom();
+        topMapMarkersRef.current.forEach(({ marker }) => {
+          try {
+            if (!marker) return;
+            const tooltip = marker.getTooltip();
+            if (tooltip && typeof tooltip.options !== 'undefined') {
+              if (z >= 14) {
+                marker.openTooltip();
+              } else {
+                marker.closeTooltip();
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        });
+      });
+
+      if (bounds.isValid()) {
+        topMapInstance.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+      }
+
+      setTimeout(() => {
+        try { topMapInstance.current.invalidateSize(); } catch (e) {}
+      }, 100);
+    };
+
+    setupMap();
+
+    return () => {
+      if (topMapInstance.current) {
+        topMapInstance.current.remove();
+        topMapInstance.current = null;
+      }
+      topMapMarkersRef.current.forEach(({ marker }) => marker.remove());
+      topMapMarkersRef.current = [];
+    };
+  }, [viewMode, topViewMode, topAccounts, MAPBOX_KEY]);
+
+  // Keep savedAccountsRef current and update pin icons without rebuilding the map
+  useEffect(() => {
+    savedAccountsRef.current = savedAccounts;
+    if (!topMapInstance.current || !window.L || topViewMode !== 'map') return;
+    const L = window.L;
+    topMapMarkersRef.current.forEach(({ marker, row }) => {
+      const annualSales = Number(row.annual_sales || row.total_receipts || 0);
+      const tierColor = annualSales >= 1000000 ? '#f59e0b' : annualSales >= 500000 ? '#f97316' : annualSales >= 250000 ? '#fb7185' : '#60a5fa';
+      const alreadySaved = (Array.isArray(savedAccounts) ? savedAccounts : []).some((saved) => {
+        if (!saved) return false;
+        if (saved.id && row.id && saved.id === row.id) return true;
+        if (saved.location_name && row.location_name && saved.location_name.toLowerCase() === row.location_name.toLowerCase()) return true;
+        if (saved.location_address && row.location_address && saved.location_address.toLowerCase() === row.location_address.toLowerCase()) return true;
+        if (saved.lat && saved.lng && row.lat && row.lng) {
+          const dlat = Math.abs(Number(saved.lat) - Number(row.lat));
+          const dlng = Math.abs(Number(saved.lng) - Number(row.lng));
+          if (dlat < 0.0007 && dlng < 0.0007) return true;
+        }
+        return false;
+      });
+      const newIcon = alreadySaved
+        ? L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="width:26px;height:26px;border-radius:999px;background:#10b981;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(16,185,129,0.18);"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="10" fill="#10b981"/><path d="M6 10.5l2.5 2.5 5-5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`,
+            iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -24],
+          })
+        : L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="width:26px;height:26px;border-radius:999px;background:${tierColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(0,0,0,0.35);"><div style="width:10px;height:10px;border-radius:999px;background:#fff"></div></div>`,
+            iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -24],
+          });
+      marker.setIcon(newIcon);
+    });
+  }, [savedAccounts, topViewMode]);
 
   const updateMarkers = (shouldFitBounds = false) => {
     if (!mapInstance.current || !window.L) return;
@@ -3327,6 +3581,32 @@ export default function ProspectingApp() {
               />
             )}
 
+            {/* Top Leaders View Mode Toggle */}
+            {viewMode === 'top' && topAccounts.length > 0 && (
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => setTopViewMode("list")}
+                  className={`flex-1 px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                    topViewMode === "list"
+                      ? "bg-indigo-600 border-indigo-500 text-white"
+                      : "bg-slate-900/70 border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  📋 List
+                </button>
+                <button
+                  onClick={() => setTopViewMode("map")}
+                  className={`flex-1 px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                    topViewMode === "map"
+                      ? "bg-indigo-600 border-indigo-500 text-white"
+                      : "bg-slate-900/70 border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  🗺️ Map
+                </button>
+              </div>
+            )}
+
             {/* Route Planning Panel removed - route planning is now map-only */}
 
             {/* Manual Add Panel */}
@@ -3646,6 +3926,8 @@ export default function ProspectingApp() {
               </div>
             )}
 
+            {/* List — hidden in map mode */}
+            {!(viewMode === "top" && topViewMode === "map") && (
             <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
               {viewMode === "nro" ? (
                 nroResults.length > 0 ? (
@@ -3811,11 +4093,17 @@ export default function ProspectingApp() {
                 </>
               )}
             </div>
+            )}
           </aside>
         )}
 
         {/* Right column */}
-        <section className={viewMode === "metrics" || viewMode === "map" ? "lg:col-span-12" : "lg:col-span-8"}>
+        <section className={(viewMode === "metrics" || viewMode === "map") ? "lg:col-span-12" : "lg:col-span-8"}>
+          {viewMode === "top" && topViewMode === "map" && (
+            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-6" style={{ height: 480 }}>
+              <div ref={topMapRef} className="w-full h-full" />
+            </div>
+          )}
           {viewMode === "map" ? (
             <>
               <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
@@ -5083,11 +5371,23 @@ export default function ProspectingApp() {
             </div>
           ) : (
             <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
-              <Navigation size={40} className="text-indigo-600 opacity-20 mb-6" />
-              <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">System Idle</h2>
-              <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2 max-w-[320px]">
-                Search for a Texas establishment to begin intelligence gathering.
-              </p>
+              {viewMode === "top" && topViewMode === "map" ? (
+                <>
+                  <MapPin size={40} className="text-indigo-600 opacity-20 mb-6" />
+                  <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Select a Pin</h2>
+                  <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2 max-w-[320px]">
+                    Click any pin on the map to view account details.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Navigation size={40} className="text-indigo-600 opacity-20 mb-6" />
+                  <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">System Idle</h2>
+                  <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2 max-w-[320px]">
+                    Search for a Texas establishment to begin intelligence gathering.
+                  </p>
+                </>
+              )}
             </div>
           )}
         </section>
