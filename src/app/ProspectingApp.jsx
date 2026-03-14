@@ -1672,6 +1672,14 @@ export default function ProspectingApp() {
         }
       }
 
+      // Pre-count duplicate coordinates so stacked pins can be spread
+      const topCoordsCount = new Map();
+      pinnedRows.forEach((r) => {
+        const k = `${r.lat.toFixed(6)},${r.lng.toFixed(6)}`;
+        topCoordsCount.set(k, (topCoordsCount.get(k) || 0) + 1);
+      });
+      const topCoordsOffset = new Map();
+
       pinnedRows.forEach((row) => {
 
         const annualSales = Number(row.annual_sales || row.total_receipts || 0);
@@ -1720,7 +1728,20 @@ export default function ProspectingApp() {
           });
         }
 
-        const marker = L.marker([row.lat, row.lng], { icon: markerIcon }).addTo(topMapInstance.current);
+        // Spread pins that share the same coordinates
+        let markerLat = row.lat;
+        let markerLng = row.lng;
+        const coordKey = `${row.lat.toFixed(6)},${row.lng.toFixed(6)}`;
+        if (topCoordsCount.get(coordKey) > 1) {
+          const offsetIndex = topCoordsOffset.get(coordKey) || 0;
+          topCoordsOffset.set(coordKey, offsetIndex + 1);
+          const angle = (offsetIndex * 2 * Math.PI) / topCoordsCount.get(coordKey);
+          const offsetDistance = 0.0015;
+          markerLat += offsetDistance * Math.sin(angle);
+          markerLng += offsetDistance * Math.cos(angle);
+        }
+
+        const marker = L.marker([markerLat, markerLng], { icon: markerIcon }).addTo(topMapInstance.current);
 
         const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.location_address || row.location_name || '')}`;
         const displayName = (row.location_name || row.taxpayer_name || 'Account').toString();
@@ -4195,62 +4216,6 @@ export default function ProspectingApp() {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => {
-                    setRestaurantSearchMode(!restaurantSearchMode);
-                    // Clean up restaurant markers
-                    clearRestaurantMarkers();
-                    setRestaurantSearchQuery('');
-                    setMapSearch('');
-                  }}
-                  className={`px-3 py-2 rounded-xl border text-[8px] font-black uppercase flex items-center gap-2 shadow-xl whitespace-nowrap transition-colors ${
-                    restaurantSearchMode
-                      ? 'bg-orange-900/40 border-orange-600 text-orange-300'
-                      : 'bg-slate-900/90 border-slate-700 text-slate-300'
-                  } backdrop-blur-md pointer-events-auto`}
-                >
-                  🍽️ {restaurantSearchMode ? 'RESTAURANT SEARCH' : 'FIND RESTAURANTS'}
-                </button>
-                {restaurantSearchMode && (
-                  <div className="flex gap-2 pointer-events-auto">
-                    <button
-                      onClick={() => {
-                        if (mapInstance.current) {
-                          const center = mapInstance.current.getCenter();
-                          searchNearbyRestaurants(center.lat, center.lng, 'restaurant');
-                        }
-                      }}
-                      disabled={searchingRestaurants}
-                      className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
-                    >
-                      {searchingRestaurants ? '⏳' : '🍽️'} Restaurants
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (mapInstance.current) {
-                          const center = mapInstance.current.getCenter();
-                          searchNearbyRestaurants(center.lat, center.lng, 'bar');
-                        }
-                      }}
-                      disabled={searchingRestaurants}
-                      className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
-                    >
-                      {searchingRestaurants ? '⏳' : '🍸'} Bars
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (mapInstance.current) {
-                          const center = mapInstance.current.getCenter();
-                          searchNearbyRestaurants(center.lat, center.lng, 'cafe');
-                        }
-                      }}
-                      disabled={searchingRestaurants}
-                      className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50"
-                    >
-                      {searchingRestaurants ? '⏳' : '☕'} Cafes
-                    </button>
-                  </div>
-                )}
                 <div className="px-3 py-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2 shadow-xl">
                   <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
                   {restaurantSearchMode ? `${restaurantMarkers.length} RESTAURANTS` : `${savedAccounts.length} PINS`}
@@ -4460,13 +4425,74 @@ export default function ProspectingApp() {
               </div>
 
               {/* My Location Button - Bottom Left */}
-              <button
-                onClick={handleMyLocation}
-                title="My location"
-                className="absolute bottom-6 left-6 z-[1000] p-4 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-indigo-400 hover:text-indigo-300 hover:bg-slate-800/90 transition-all shadow-2xl"
-              >
-                <MapPin size={24} />
-              </button>
+              <div className="absolute bottom-6 left-6 z-[1000] flex items-end gap-3">
+                <button
+                  onClick={handleMyLocation}
+                  title="My location"
+                  className="p-4 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-indigo-400 hover:text-indigo-300 hover:bg-slate-800/90 transition-all shadow-2xl"
+                >
+                  <MapPin size={24} />
+                </button>
+
+                {/* Find Restaurants Button */}
+                <div className="flex flex-col items-start gap-2">
+                  {restaurantSearchMode && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (mapInstance.current) {
+                            const center = mapInstance.current.getCenter();
+                            searchNearbyRestaurants(center.lat, center.lng, 'restaurant');
+                          }
+                        }}
+                        disabled={searchingRestaurants}
+                        className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur-md text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-xl"
+                      >
+                        {searchingRestaurants ? '⏳' : '🍽️'} Restaurants
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (mapInstance.current) {
+                            const center = mapInstance.current.getCenter();
+                            searchNearbyRestaurants(center.lat, center.lng, 'bar');
+                          }
+                        }}
+                        disabled={searchingRestaurants}
+                        className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur-md text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-xl"
+                      >
+                        {searchingRestaurants ? '⏳' : '🍸'} Bars
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (mapInstance.current) {
+                            const center = mapInstance.current.getCenter();
+                            searchNearbyRestaurants(center.lat, center.lng, 'cafe');
+                          }
+                        }}
+                        disabled={searchingRestaurants}
+                        className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur-md text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-xl"
+                      >
+                        {searchingRestaurants ? '⏳' : '☕'} Cafes
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => {
+                      setRestaurantSearchMode(!restaurantSearchMode);
+                      clearRestaurantMarkers();
+                      setRestaurantSearchQuery('');
+                      setMapSearch('');
+                    }}
+                    className={`px-3 py-2.5 rounded-2xl border text-[8px] font-black uppercase flex items-center gap-2 shadow-2xl whitespace-nowrap transition-colors backdrop-blur-md ${
+                      restaurantSearchMode
+                        ? 'bg-orange-900/60 border-orange-600 text-orange-300'
+                        : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:bg-slate-800/90'
+                    }`}
+                  >
+                    🍽️ {restaurantSearchMode ? 'Restaurant Mode' : 'Find Restaurants'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Route Planning Section - Below Map */}
