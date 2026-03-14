@@ -178,6 +178,7 @@ export default function ProspectingApp() {
   const [savedSearchTerm, setSavedSearchTerm] = useState("");
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
   const [topViewMode, setTopViewMode] = useState("list"); // list | map
+  const [topMapPinsLoading, setTopMapPinsLoading] = useState(false);
   const topMapRef = useRef(null);
   const topMapInstance = useRef(null);
   const topMapMarkersRef = useRef([]); // [{marker, row}]
@@ -1804,7 +1805,7 @@ export default function ProspectingApp() {
       }, 100);
     };
 
-    setupMap();
+    setupMap().finally(() => setTopMapPinsLoading(false));
 
     return () => {
       if (topMapInstance.current) {
@@ -1815,6 +1816,11 @@ export default function ProspectingApp() {
       topMapMarkersRef.current = [];
     };
   }, [viewMode, topViewMode, topAccounts, MAPBOX_KEY]);
+
+  // When top leaders fetch begins, show the loading overlay until pins are fully placed
+  useEffect(() => {
+    if (topLoading) setTopMapPinsLoading(true);
+  }, [topLoading]);
 
   // Keep savedAccountsRef current and update pin icons without rebuilding the map
   useEffect(() => {
@@ -4121,9 +4127,33 @@ export default function ProspectingApp() {
         {/* Right column */}
         <section className={(viewMode === "metrics" || viewMode === "map") ? "lg:col-span-12" : "lg:col-span-8"}>
           {viewMode === "top" && topViewMode === "map" && (
-            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-6" style={{ height: 480, isolation: "isolate", zIndex: 0, position: "relative" }}>
-              <div ref={topMapRef} className="w-full h-full" />
-            </div>
+            <>
+              <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-3" style={{ height: 480, isolation: "isolate", zIndex: 0, position: "relative" }}>
+                <div ref={topMapRef} className="w-full h-full" />
+                {(topLoading || topMapPinsLoading) && (
+                  <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/50 backdrop-blur-sm rounded-[2.5rem]">
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 size={48} className="text-indigo-400 animate-spin" />
+                      <span className="text-white font-black text-[11px] uppercase tracking-widest">Loading Pins...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* GPV Tier Color Key */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 mb-4 bg-[#1E293B] rounded-2xl border border-slate-700">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">GPV Tier</span>
+                {GPV_TIERS.filter(t => t.id !== "nro").map(t => (
+                  <div key={t.id} className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: t.color }} />
+                    <span className="text-[10px] font-bold text-slate-300">{t.label}</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-1.5 ml-1 pl-3 border-l border-slate-700">
+                  <div className="w-2.5 h-2.5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: "#06b6d4" }} />
+                  <span className="text-[10px] font-bold text-slate-300">NRO</span>
+                </div>
+              </div>
+            </>
           )}
           {viewMode === "map" ? (
             <>
