@@ -4121,13 +4121,13 @@ export default function ProspectingApp() {
         {/* Right column */}
         <section className={(viewMode === "metrics" || viewMode === "map") ? "lg:col-span-12" : "lg:col-span-8"}>
           {viewMode === "top" && topViewMode === "map" && (
-            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-6" style={{ height: 480 }}>
+            <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-6" style={{ height: 480, isolation: "isolate", zIndex: 0, position: "relative" }}>
               <div ref={topMapRef} className="w-full h-full" />
             </div>
           )}
           {viewMode === "map" ? (
             <>
-              <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]">
+              <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]" style={{ isolation: "isolate" }}>
               
               {/* Floating search bar */}
               <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3 pointer-events-none">
