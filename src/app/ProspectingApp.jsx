@@ -184,6 +184,13 @@ export default function ProspectingApp() {
   const topMapMarkersRef = useRef([]); // [{marker, row}]
   const savedAccountsRef = useRef([]);
 
+  // NRO map view
+  const [nroViewMode, setNroViewMode] = useState("list"); // list | map
+  const [nroMapPinsLoading, setNroMapPinsLoading] = useState(false);
+  const nroMapRef = useRef(null);
+  const nroMapInstance = useRef(null);
+  const nroMapMarkersRef = useRef([]); // [{marker, row}]
+
   const [venueType, setVenueType] = useState("casual_dining");
   const [customFoodPct, setCustomFoodPct] = useState("");
 
@@ -259,6 +266,10 @@ export default function ProspectingApp() {
   const [businessHours, setBusinessHours] = useState(null);
   const [businessWebsite, setBusinessWebsite] = useState(null);
   const [hoursLoading, setHoursLoading] = useState(false);
+
+  // POS detection
+  const [posSystem, setPosSystem] = useState(null); // { pos: string, source: string|null }
+  const [posLoading, setPosLoading] = useState(false);
 
   // Coordinate editor state
   const [coordLat, setCoordLat] = useState(0);
@@ -1822,6 +1833,217 @@ export default function ProspectingApp() {
     if (topLoading) setTopMapPinsLoading(true);
   }, [topLoading]);
 
+  // NRO map mode
+  useEffect(() => {
+    if (viewMode !== "nro" || nroViewMode !== "map") return;
+    if (!nroMapRef.current) return;
+
+    const setupNroMap = async () => {
+      if (!window.L) {
+        if (!document.querySelector('link[href*="leaflet.css"]')) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+          document.head.appendChild(link);
+        }
+        if (!document.querySelector('script[src*="leaflet.js"]')) {
+          const script = document.createElement("script");
+          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+          document.head.appendChild(script);
+        }
+        await new Promise((resolve) => {
+          const interval = setInterval(() => {
+            if (window.L) { clearInterval(interval); resolve(); }
+          }, 100);
+        });
+      }
+
+      const L = window.L;
+      if (!L || !nroMapRef.current) return;
+
+      if (nroMapInstance.current) { nroMapInstance.current.remove(); }
+      nroMapMarkersRef.current.forEach((m) => m.remove());
+      nroMapMarkersRef.current = [];
+
+      nroMapInstance.current = L.map(nroMapRef.current, {
+        zoomControl: true,
+        attributionControl: false,
+      }).setView(TEXAS_CENTER, 7);
+
+      if (MAPBOX_KEY) {
+        L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+          tileSize: 512, zoomOffset: -1, maxZoom: 22,
+        }).addTo(nroMapInstance.current);
+      } else {
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 }).addTo(nroMapInstance.current);
+      }
+
+      const bounds = L.latLngBounds([]);
+      const pinnedRows = [];
+
+      const geocodeAddress = async (address) => {
+        if (!address) return null;
+        try {
+          const res = await fetch(`/api/geocode?address=${encodeURIComponent(address)}`);
+          const data = await res.json();
+          if (res.ok && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
+            return { lat: Number(data.lat), lng: Number(data.lng) };
+          }
+        } catch (e) { console.warn('NRO map geocode failed', e); }
+        return null;
+      };
+
+      for (const row of nroResults) {
+        let lat = Number(row.lat);
+        let lng = Number(row.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          const parts = [row.location_address, row.location_city, row.location_zip, 'TX'];
+          const coords = await geocodeAddress(parts.filter(Boolean).join(', '));
+          if (coords) { lat = coords.lat; lng = coords.lng; }
+        }
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          pinnedRows.push({ ...row, lat, lng });
+        }
+      }
+
+      // Spread stacked pins
+      const coordsCount = new Map();
+      pinnedRows.forEach((r) => {
+        const k = `${r.lat.toFixed(6)},${r.lng.toFixed(6)}`;
+        coordsCount.set(k, (coordsCount.get(k) || 0) + 1);
+      });
+      const coordsOffset = new Map();
+
+      pinnedRows.forEach((row) => {
+        const isPermit = row.source === 'Austin Building Permit';
+        const pinColor = isPermit ? '#f97316' : '#06b6d4'; // orange for permits, cyan for TABC
+
+        const alreadySaved = (Array.isArray(savedAccountsRef.current) ? savedAccountsRef.current : []).some((saved) => {
+          if (!saved) return false;
+          if (saved.location_name && row.location_name && saved.location_name.toLowerCase() === row.location_name.toLowerCase()) return true;
+          if (saved.location_address && row.location_address && saved.location_address.toLowerCase() === row.location_address.toLowerCase()) return true;
+          return false;
+        });
+
+        const markerIcon = alreadySaved
+          ? L.divIcon({
+              className: 'custom-div-icon',
+              html: `<div style="width:26px;height:26px;border-radius:999px;background:#10b981;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(16,185,129,0.18);">
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="10" cy="10" r="10" fill="#10b981"/>
+                  <path d="M6 10.5l2.5 2.5 5-5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>`,
+              iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -24],
+            })
+          : L.divIcon({
+              className: 'custom-div-icon',
+              html: `<div style="width:26px;height:26px;border-radius:999px;background:${pinColor};border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 14px rgba(0,0,0,0.35);">
+                <div style="width:10px;height:10px;border-radius:999px;background:#fff"></div>
+              </div>`,
+              iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -24],
+            });
+
+        // Spread pins sharing the same coordinate
+        let markerLat = row.lat;
+        let markerLng = row.lng;
+        const coordKey = `${row.lat.toFixed(6)},${row.lng.toFixed(6)}`;
+        if (coordsCount.get(coordKey) > 1) {
+          const offsetIndex = coordsOffset.get(coordKey) || 0;
+          coordsOffset.set(coordKey, offsetIndex + 1);
+          const angle = (offsetIndex * 2 * Math.PI) / coordsCount.get(coordKey);
+          markerLat += 0.0015 * Math.sin(angle);
+          markerLng += 0.0015 * Math.cos(angle);
+        }
+
+        const marker = L.marker([markerLat, markerLng], { icon: markerIcon }).addTo(nroMapInstance.current);
+
+        const displayName = (row.location_name || '').toString();
+        marker.bindTooltip(displayName, {
+          permanent: true, direction: 'bottom', className: 'pin-label', offset: [0, 10],
+        });
+
+        marker.on('click', async () => {
+          setNroViewMode("list");
+          // Trigger the same click handler logic as the list item
+          setLoading(true);
+          try {
+            const searchName = row.location_name.toUpperCase();
+            const searchCity = row.location_city.toUpperCase();
+            const where = buildSocrataWhere(searchName, searchCity);
+            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=12`;
+            const res = await fetch(`${BASE_URL}${query}`);
+            let history = [];
+            if (res.ok) {
+              const hist = await res.json();
+              const rows = Array.isArray(hist) ? hist : [];
+              const exactMatch = rows.filter(r => (r.location_name || '').toUpperCase() === searchName);
+              if (exactMatch.length > 0) {
+                const reversed = [...exactMatch].reverse();
+                history = reversed.map((h) => ({
+                  month: monthLabelFromDate(h[DATE_FIELD]),
+                  liquor: Number(h.liquor_receipts || 0),
+                  beer: Number(h.beer_receipts || 0),
+                  wine: Number(h.wine_receipts || 0),
+                  total: Number(h[TOTAL_FIELD] || 0),
+                  rawDate: h[DATE_FIELD],
+                }));
+              }
+            }
+            setSelectedEstablishment({ info: row, history });
+            if (history.length === 0) {
+              setSelectedGpvTier('nro');
+            } else {
+              const total = history.reduce((sum, h) => sum + h.total, 0);
+              const avg = total / history.length;
+              const annualForecast = avg * 12;
+              let tier = 'tier1';
+              if (annualForecast >= 1000000) tier = 'tier6';
+              else if (annualForecast >= 500000) tier = 'tier5';
+              else if (annualForecast >= 250000) tier = 'tier4';
+              else if (annualForecast >= 100000) tier = 'tier3';
+              else if (annualForecast >= 50000) tier = 'tier2';
+              setSelectedGpvTier(tier);
+            }
+            await fetchAiForInfo(row, { updateState: true });
+          } catch {
+            setSelectedEstablishment({ info: row, history: [] });
+            setSelectedGpvTier('nro');
+            try { await fetchAiForInfo(row, { updateState: true }); } catch {}
+          } finally {
+            setLoading(false);
+          }
+        });
+
+        nroMapMarkersRef.current.push({ marker, row });
+        bounds.extend([row.lat, row.lng]);
+      });
+
+      nroMapInstance.current.on('zoomend', () => {
+        const z = nroMapInstance.current.getZoom();
+        nroMapMarkersRef.current.forEach(({ marker }) => {
+          try {
+            const tooltip = marker.getTooltip();
+            if (tooltip) { z >= 14 ? marker.openTooltip() : marker.closeTooltip(); }
+          } catch {}
+        });
+      });
+
+      if (bounds.isValid()) {
+        nroMapInstance.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+      }
+      setTimeout(() => { try { nroMapInstance.current.invalidateSize(); } catch {} }, 100);
+    };
+
+    setupNroMap().finally(() => setNroMapPinsLoading(false));
+
+    return () => {
+      if (nroMapInstance.current) { nroMapInstance.current.remove(); nroMapInstance.current = null; }
+      nroMapMarkersRef.current.forEach(({ marker }) => marker.remove());
+      nroMapMarkersRef.current = [];
+    };
+  }, [viewMode, nroViewMode, nroResults, MAPBOX_KEY]);
+
   // Keep savedAccountsRef current and update pin icons without rebuilding the map
   useEffect(() => {
     savedAccountsRef.current = savedAccounts;
@@ -2434,9 +2656,25 @@ export default function ProspectingApp() {
 
   // Fetch business hours when selectedEstablishment changes
   useEffect(() => {
+    const runPosDetection = (name, city, website, menuUri) => {
+      if (!name) return;
+      setPosLoading(true);
+      setPosSystem(null);
+      const params = new URLSearchParams({ name });
+      if (city) params.set('city', city);
+      if (website) params.set('website', website);
+      if (menuUri) params.set('menuUrl', menuUri);
+      fetch(`/api/detect-pos?${params}`)
+        .then(r => r.json())
+        .then(d => setPosSystem(d))
+        .catch(() => setPosSystem({ pos: 'Unknown', source: null }))
+        .finally(() => setPosLoading(false));
+    };
+
     const fetchHours = async () => {
       if (!selectedEstablishment?.info) {
         setBusinessHours(null);
+        setPosSystem(null);
         return;
       }
 
@@ -2450,6 +2688,12 @@ export default function ProspectingApp() {
           setBusinessHours(hoursWithCurrentStatus);
           setBusinessWebsite(parsed.businessWebsite || null);
           setHoursLoading(false);
+          runPosDetection(
+            selectedEstablishment.info.location_name,
+            selectedEstablishment.info.location_city || '',
+            parsed.businessWebsite || null,
+            null
+          );
           return;
         }
       } catch {}
@@ -2468,14 +2712,17 @@ export default function ProspectingApp() {
           const hoursWithCurrentStatus = recalculateOpenNow(data.hours);
           setBusinessHours(hoursWithCurrentStatus);
           setBusinessWebsite(data.website || null);
+          runPosDetection(name, selectedEstablishment.info.location_city || '', data.website || null, data.menuUri || null);
         } else {
           setBusinessHours(null);
           setBusinessWebsite(null);
+          runPosDetection(name, selectedEstablishment.info.location_city || '', null, null);
         }
       } catch (error) {
         console.error('Failed to fetch hours:', error);
         setBusinessHours(null);
         setBusinessWebsite(null);
+        runPosDetection(name, selectedEstablishment.info.location_city || '', null, null);
       } finally {
         setHoursLoading(false);
       }
@@ -3634,6 +3881,32 @@ export default function ProspectingApp() {
               </div>
             )}
 
+            {/* NRO View Mode Toggle */}
+            {viewMode === 'nro' && nroResults.length > 0 && (
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => setNroViewMode("list")}
+                  className={`flex-1 px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                    nroViewMode === "list"
+                      ? "bg-indigo-600 border-indigo-500 text-white"
+                      : "bg-slate-900/70 border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  📋 List
+                </button>
+                <button
+                  onClick={() => { setNroMapPinsLoading(true); setNroViewMode("map"); }}
+                  className={`flex-1 px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${
+                    nroViewMode === "map"
+                      ? "bg-indigo-600 border-indigo-500 text-white"
+                      : "bg-slate-900/70 border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  🗺️ Map
+                </button>
+              </div>
+            )}
+
             {/* Route Planning Panel removed - route planning is now map-only */}
 
             {/* Manual Add Panel */}
@@ -3954,7 +4227,7 @@ export default function ProspectingApp() {
             )}
 
             {/* List — hidden in map mode */}
-            {!(viewMode === "top" && topViewMode === "map") && (
+            {!(viewMode === "top" && topViewMode === "map") && !(viewMode === "nro" && nroViewMode === "map") && (
             <div className="space-y-3 max-h-[550px] overflow-y-auto pr-2 custom-scroll">
               {viewMode === "nro" ? (
                 nroResults.length > 0 ? (
@@ -4151,6 +4424,37 @@ export default function ProspectingApp() {
                 <div className="flex items-center gap-1.5 ml-1 pl-3 border-l border-slate-700">
                   <div className="w-2.5 h-2.5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: "#06b6d4" }} />
                   <span className="text-[10px] font-bold text-slate-300">NRO</span>
+                </div>
+              </div>
+            </>
+          )}
+          {viewMode === "nro" && nroViewMode === "map" && (
+            <>
+              <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-3" style={{ height: 480, isolation: "isolate", zIndex: 0, position: "relative" }}>
+                <div ref={nroMapRef} className="w-full h-full" />
+                {nroMapPinsLoading && (
+                  <div className="absolute inset-0 z-[500] flex items-center justify-center bg-black/50 backdrop-blur-sm rounded-[2.5rem]">
+                    <div className="flex flex-col items-center gap-3">
+                      <Loader2 size={48} className="text-indigo-400 animate-spin" />
+                      <span className="text-white font-black text-[11px] uppercase tracking-widest">Loading Pins...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* NRO Map Legend */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 mb-4 bg-[#1E293B] rounded-2xl border border-slate-700">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Legend</span>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: "#06b6d4" }} />
+                  <span className="text-[10px] font-bold text-slate-300">New TABC License</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: "#f97316" }} />
+                  <span className="text-[10px] font-bold text-slate-300">Building Permit</span>
+                </div>
+                <div className="flex items-center gap-1.5 ml-1 pl-3 border-l border-slate-700">
+                  <div className="w-2.5 h-2.5 rounded-full border-2 border-white/30 flex-shrink-0" style={{ backgroundColor: "#10b981" }} />
+                  <span className="text-[10px] font-bold text-slate-300">Already Saved</span>
                 </div>
               </div>
             </>
@@ -5191,6 +5495,60 @@ export default function ProspectingApp() {
                         </a>
                       </div>
                     )}
+
+                    {/* POS System */}
+                    {(() => {
+                      const POS_LOGOS = {
+                        "Toast":          "https://www.toasttab.com/favicon.ico",
+                        "Square":         "https://squareup.com/favicon.ico",
+                        "Clover":         "https://www.clover.com/favicon.ico",
+                        "Lightspeed":     "https://www.lightspeedhq.com/favicon.ico",
+                        "Olo":            "https://www.olo.com/favicon.ico",
+                        "SpotOn":         "https://spoton.com/favicon.ico",
+                        "Aloha / NCR":    "https://www.ncrvoyix.com/favicon.ico",
+                        "TouchBistro":    "https://www.touchbistro.com/favicon.ico",
+                        "BentoBox":       "https://bentobox.com/favicon.ico",
+                        "Revel":          "https://revelsystems.com/favicon.ico",
+                        "HungerRush":     "https://www.hungerrush.com/favicon.ico",
+                        "Lavu":           "https://poslavu.com/favicon.ico",
+                        "Owner.com":      "https://www.owner.com/favicon.ico",
+                        "PopMenu":        "https://popmenu.com/favicon.ico",
+                      };
+                      const logoUrl = posSystem?.pos ? POS_LOGOS[posSystem.pos] : null;
+                      return (
+                        <div className="mt-4">
+                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                            POS System
+                          </div>
+                          {posLoading ? (
+                            <span className="text-[11px] text-slate-500 font-medium italic">Detecting...</span>
+                          ) : posSystem ? (
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                                posSystem.pos === 'Unknown'
+                                  ? 'bg-slate-700/50 text-slate-400 border border-slate-600'
+                                  : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                              }`}>
+                                {logoUrl && (
+                                  <img
+                                    src={logoUrl}
+                                    alt=""
+                                    width={14}
+                                    height={14}
+                                    className="rounded-sm object-contain"
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                )}
+                                {posSystem.pos}
+                              </span>
+                              {posSystem.source && posSystem.pos !== 'Unknown' && (
+                                <span className="text-[9px] text-slate-500 font-medium">via {posSystem.source}</span>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
 
                     {/* Hours of Operation */}
                     {hoursLoading ? (

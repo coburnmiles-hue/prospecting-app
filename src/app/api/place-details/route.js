@@ -46,7 +46,7 @@ export async function GET(req) {
     const hours = place.regularOpeningHours || place.currentOpeningHours;
     
     if (!hours) {
-      return Response.json({ hours: null, message: 'Hours not available' }, { status: 200 });
+      return Response.json({ hours: null, message: 'Hours not available', website: place.websiteUri || null }, { status: 200 });
     }
 
     // Format the hours data
@@ -58,7 +58,7 @@ export async function GET(req) {
 
     return Response.json({ 
       hours: formattedHours, 
-      website: place.websiteUri || null 
+      website: place.websiteUri || null
     }, { status: 200 });
   } catch (err) {
     console.error('Place details API error:', err);
