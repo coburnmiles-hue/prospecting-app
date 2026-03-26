@@ -32,7 +32,7 @@ export default function GpvTierPanel({
         <h4 className="text-[10px] font-black uppercase italic tracking-widest text-indigo-400 mb-3">
           GPV Tier (Auto-Selected)
         </h4>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col gap-3 mb-6">
           <div className="flex flex-wrap gap-3">
             {gpvTiers.map((t) => (
               <div
@@ -51,10 +51,10 @@ export default function GpvTierPanel({
             ))}
           </div>
 
-          <div className="ml-4 flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={onToggleActiveOpp}
-              className={`w-28 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+              className={`flex-1 min-w-[90px] px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
                 selectedActiveOpp ? "bg-emerald-500 text-white" : "opacity-70"
               }`}
               style={{ borderColor: selectedActiveOpp ? "#10b981" : "#334155" }}
@@ -64,7 +64,7 @@ export default function GpvTierPanel({
 
             <button
               onClick={onToggleActiveAccount}
-              className={`w-28 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+              className={`flex-1 min-w-[90px] px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
                 selectedActiveAccount ? "bg-emerald-500 text-white" : "opacity-70"
               }`}
               style={{ borderColor: selectedActiveAccount ? "#10b981" : "#334155" }}
@@ -74,7 +74,7 @@ export default function GpvTierPanel({
 
             <button
               onClick={onToggleReferral}
-              className={`w-28 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+              className={`flex-1 min-w-[90px] px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
                 selectedReferral ? "bg-purple-500 text-white" : "opacity-70"
               }`}
               style={{ borderColor: selectedReferral ? "#a855f7" : "#334155" }}
