@@ -50,6 +50,7 @@ export function parseSavedNotes(raw) {
       gpvTier: p?.gpvTier ?? null,
       activeOpp: p?.activeOpp ?? false,
       activeAccount: p?.activeAccount ?? false,
+      referral: p?.referral ?? false,
       activeOppDate: p?.activeOppDate || null,
       activeAccountDate: p?.activeAccountDate || null,
       wonGpv: p?.wonGpv || null,
@@ -64,7 +65,7 @@ export function parseSavedNotes(raw) {
     };
   } catch (e) {
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], followups: [], history: [], activeOpp: false, activeAccount: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
+    return { key: m ? m[1] : undefined, notes: [], followups: [], history: [], activeOpp: false, activeAccount: false, referral: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
   }
 }
 

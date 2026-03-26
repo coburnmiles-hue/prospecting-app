@@ -208,6 +208,7 @@ export default function ProspectingApp() {
   const [selectedGpvTier, setSelectedGpvTier] = useState(null);
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
   const [selectedActiveAccount, setSelectedActiveAccount] = useState(false);
+  const [selectedReferral, setSelectedReferral] = useState(false);
   const [wonGpv, setWonGpv] = useState('');
   const [wonArr, setWonArr] = useState('');
   const [wonDateSigned, setWonDateSigned] = useState('');
@@ -256,6 +257,7 @@ export default function ProspectingApp() {
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
   const [showNroOnly, setShowNroOnly] = useState(false);
+  const [showReferralOnly, setShowReferralOnly] = useState(false);
   const [showOpenOnly, setShowOpenOnly] = useState(false);
   const [customDayFilter, setCustomDayFilter] = useState(null); // 0-6 (Sunday-Saturday)
   const [customHourFilter, setCustomHourFilter] = useState(""); // 1-12
@@ -537,6 +539,7 @@ export default function ProspectingApp() {
     setSelectedGpvTier(null);
     setSelectedActiveOpp(false);
     setSelectedActiveAccount(false);
+    setSelectedReferral(false);
     setWonGpv('');
     setWonArr('');
     setWonDateSigned('');
@@ -805,6 +808,7 @@ export default function ProspectingApp() {
       setSelectedGpvTier(null);
       setSelectedActiveOpp(false);
       setSelectedActiveAccount(false);
+      setSelectedReferral(false);
       setWonGpv('');
       setWonArr('');
       setWonDateSigned('');
@@ -823,6 +827,7 @@ export default function ProspectingApp() {
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
       setSelectedActiveAccount(parsed?.activeAccount || false);
+      setSelectedReferral(parsed?.referral || false);
       setWonGpv(parsed?.wonGpv || '');
       setWonArr(parsed?.wonArr || '');
       setWonDateSigned(parsed?.wonDateSigned || '');
@@ -1010,6 +1015,9 @@ export default function ProspectingApp() {
             if (parsed?.activeOpp !== selectedActiveOpp) {
               setSelectedActiveOpp(parsed?.activeOpp || false);
             }
+            if (parsed?.referral !== selectedReferral) {
+              setSelectedReferral(parsed?.referral || false);
+            }
             if (parsed?.venueType && parsed.venueType !== venueType) {
               setVenueType(parsed.venueType);
             }
@@ -1108,6 +1116,7 @@ export default function ProspectingApp() {
           const parsed = parseSavedNotes(refreshedRow.notes);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
+          setSelectedReferral(parsed?.referral || false);
           if (parsed?.venueType) {
             setVenueType(parsed.venueType);
           }
@@ -1578,12 +1587,16 @@ export default function ProspectingApp() {
             }
           },
           (err) => {
-            const errorMessages = {
-              1: 'Permission denied - enable location access in browser settings',
-              2: 'Position unavailable - location services may be unavailable',
-              3: 'Request timeout - geolocation took too long'
-            };
-            console.error('Geolocation error:', errorMessages[err.code] || err.message);
+            if (err.code === 1) {
+              // Permission denied — not an app error, silently ignore
+              console.warn('Geolocation: permission denied. User can enable location in browser settings.');
+            } else {
+              const errorMessages = {
+                2: 'Position unavailable - location services may be unavailable',
+                3: 'Request timeout - geolocation took too long'
+              };
+              console.warn('Geolocation:', errorMessages[err.code] || err.message);
+            }
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
@@ -2173,6 +2186,9 @@ export default function ProspectingApp() {
       
       // If 'show only active' is enabled, skip any non-active pins
       if (showActiveOnly && !parsed?.activeAccount) return;
+
+      // If 'show referral only' is enabled, skip any non-referral pins
+      if (showReferralOnly && !parsed?.referral) return;
 
       // If 'show NRO only' is enabled, only show NRO tier pins
       if (showNroOnly) {
@@ -2992,7 +3008,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showOpenOnly, customFilterActive]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showReferralOnly, showOpenOnly, customFilterActive]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -3360,6 +3376,7 @@ export default function ProspectingApp() {
       // Always restore GPV, Active Opp, venue type and notes owner for saved items (if present)
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
+      setSelectedReferral(parsed?.referral || false);
       if (parsed?.venueType) {
         setVenueType(parsed.venueType);
       }
@@ -3461,6 +3478,7 @@ export default function ProspectingApp() {
           setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
+          setSelectedReferral(parsed?.referral || false);
           if (parsed?.venueType) {
             setVenueType(parsed.venueType);
           }
@@ -3697,6 +3715,48 @@ export default function ProspectingApp() {
         }
       } catch (err) {
         setError(err?.message || "Could not toggle Active Account.");
+      }
+    };
+
+    // Toggle Referral flag for selected account
+    const toggleReferral = async () => {
+      if (!selectedEstablishment?.info) return;
+      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+        try {
+          const parsed = parseSavedNotes(a.notes);
+          if (parsed?.key && parsed.key === key) return true;
+        } catch {}
+        return false;
+      });
+
+      // Local-only toggle for unsaved account
+      if (!saved || !saved.id) {
+        setSelectedReferral((s) => !s);
+        setNotesOwner((o) => ({ ...o, key }));
+        return;
+      }
+
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], referral: parsed?.referral ?? false };
+        notesObj.referral = !notesObj.referral;
+
+        const res = await fetch(`/api/accounts?id=${saved.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error("Could not update referral flag");
+
+        await refreshSavedAccounts();
+
+        setSelectedReferral(notesObj.referral || false);
+        setNotesOwner({ id: saved.id, key: parsed.key || null });
+      } catch (err) {
+        setError(err?.message || "Could not toggle Referral.");
       }
     };
 
@@ -4667,6 +4727,15 @@ export default function ProspectingApp() {
                     >
                       <span className="font-black">$</span>
                       <span>Active Only</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowReferralOnly(v => !v)}
+                      title="Show referral accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showReferralOnly ? 'bg-purple-500 text-white border-purple-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>Referral</span>
                     </button>
                   </div>
 
@@ -5756,6 +5825,8 @@ export default function ProspectingApp() {
                 onToggleActiveOpp={toggleActiveOpp}
                 selectedActiveAccount={selectedActiveAccount}
                 onToggleActiveAccount={toggleActiveAccount}
+                selectedReferral={selectedReferral}
+                onToggleReferral={toggleReferral}
                 wonGpv={wonGpv}
                 setWonGpv={setWonGpv}
                 wonArr={wonArr}

@@ -5,6 +5,8 @@ export default function GpvTierPanel({
   onToggleActiveOpp,
   selectedActiveAccount,
   onToggleActiveAccount,
+  selectedReferral,
+  onToggleReferral,
   wonGpv,
   setWonGpv,
   wonArr,
@@ -52,7 +54,7 @@ export default function GpvTierPanel({
           <div className="ml-4 flex gap-2 items-center">
             <button
               onClick={onToggleActiveOpp}
-              className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+              className={`w-28 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
                 selectedActiveOpp ? "bg-emerald-500 text-white" : "opacity-70"
               }`}
               style={{ borderColor: selectedActiveOpp ? "#10b981" : "#334155" }}
@@ -62,12 +64,22 @@ export default function GpvTierPanel({
 
             <button
               onClick={onToggleActiveAccount}
-              className={`px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+              className={`w-28 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
                 selectedActiveAccount ? "bg-emerald-500 text-white" : "opacity-70"
               }`}
               style={{ borderColor: selectedActiveAccount ? "#10b981" : "#334155" }}
             >
               Active Account
+            </button>
+
+            <button
+              onClick={onToggleReferral}
+              className={`w-28 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+                selectedReferral ? "bg-purple-500 text-white" : "opacity-70"
+              }`}
+              style={{ borderColor: selectedReferral ? "#a855f7" : "#334155" }}
+            >
+              Referral
             </button>
           </div>
         </div>
