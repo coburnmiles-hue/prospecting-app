@@ -124,7 +124,7 @@ export default function ProspectingApp() {
     }
   };
 
-  const [viewMode, setViewMode] = useState("search"); // search | top | saved | metrics | map | nro
+  const [viewMode, setViewMode] = useState("saved"); // search | top | saved | metrics | map | nro
   const [savedSubView, setSavedSubView] = useState("list"); // list | info
 
   // Custom hooks for data fetching
@@ -332,7 +332,8 @@ export default function ProspectingApp() {
     return () => window.removeEventListener("resize", updateWidth);
   }, [selectedEstablishment?.info?.id, viewMode]);
 
-  // NRO Search handler - searches TABC License Information for new licenses + Austin building permits
+  // NRO Search handler - searches TABC License Information, Austin building permits,
+  // TABC Pending Applications, and Austin Food Inspection first-timers
   const handleNroSearch = async (e) => {
     if (e) e.preventDefault();
     if (!nroSearchTerm.trim()) return;
@@ -347,7 +348,7 @@ export default function ProspectingApp() {
       fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
       const dateFilter = fourMonthsAgo.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-      // Search 1: TABC License Information
+      // Search 1: TABC License Information (issued licenses)
       const licenseTypes = ['BE', 'BG', 'MB', 'N', 'NB', 'NE', 'BW'];
       const licenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
       
@@ -388,34 +389,67 @@ export default function ProspectingApp() {
       const isAustinSearch = nroSearchType === 'city' && nroSearchTerm.toUpperCase().includes('AUSTIN');
       
       if (isAustinSearch) {
-        console.log('Austin search detected - fetching building permits...');
         try {
-          // Query Austin building permits for restaurants issued in last 4 months
-          // Note: column is 'issue_date' not 'issued_date'
           const permitWhere = `lower(description) like '%restaurant%' AND issue_date > '${dateFilter}'`;
           const permitQuery = `?$where=${encodeURIComponent(permitWhere)}&$order=issue_date DESC&$limit=200`;
           const permitUrl = `https://data.austintexas.gov/resource/3syk-w9eu.json${permitQuery}`;
-          
-          console.log('Permit API URL:', permitUrl);
-          
           const permitRes = await fetch(permitUrl);
-          console.log('Permit API Response status:', permitRes.status);
-          
           if (permitRes.ok) {
             permitData = await permitRes.json();
-            console.log(`✓ Found ${permitData.length} Austin building permits for restaurants`);
-            console.log('Sample permit data:', permitData.length > 0 ? permitData[0] : 'none');
-          } else {
-            const errorText = await permitRes.text();
-            console.error('Permit API error response:', errorText);
           }
         } catch (err) {
-          console.error('Austin permit search error:', err);
-          // Don't fail the whole search if permits fail - just continue with TABC data
+          console.warn('Austin permit search error:', err);
+        }
+      }
+
+      // Search 3: TABC Pending License Applications (early-stage NROs not yet issued)
+      let pendingTabcData = [];
+      try {
+        const pendingLicenseFilter = licenseTypes.map(type => `license_type='${type}'`).join(' OR ');
+        // Note: this Socrata endpoint does not support upper() — use case-insensitive LIKE instead
+        let pendingLocationFilter = '';
+        if (nroSearchType === 'city') {
+          // Capitalize first letter of each word to match the dataset's stored casing (e.g. "Austin")
+          const term = nroSearchTerm.trim().replace(/\b\w/g, c => c.toUpperCase());
+          pendingLocationFilter = `city='${term}'`;
+        } else if (nroSearchType === 'county') {
+          pendingLocationFilter = `county LIKE '%${nroSearchTerm.trim()}%'`;
+        } else if (nroSearchType === 'zip') {
+          pendingLocationFilter = `zip LIKE '${nroSearchTerm.trim()}%'`;
+        }
+        const pendingWhere = `${pendingLocationFilter} AND (${pendingLicenseFilter}) AND submission_date > '${dateFilter}'`;
+        const pendingQuery = `?$where=${encodeURIComponent(pendingWhere)}&$order=submission_date DESC&$limit=200`;
+        const pendingUrl = `https://data.texas.gov/resource/mxm5-tdpj.json${pendingQuery}`;
+        const pendingRes = await fetch(pendingUrl);
+        if (pendingRes.ok) {
+          pendingTabcData = await pendingRes.json();
+        } else {
+          console.warn('TABC pending response error:', pendingRes.status, await pendingRes.text().catch(() => ''));
+        }
+      } catch (err) {
+        console.warn('TABC pending applications search error:', err);
+      }
+
+      // Search 4: Austin Food Establishment Inspection Scores — first-time inspections (Austin only)
+      let newInspectionData = [];
+      if (isAustinSearch) {
+        try {
+          // Find establishments whose very first inspection falls within the last 4 months
+          const inspectionWhere = `min(inspection_date) > '${dateFilter}'`;
+          const inspectionQuery = `?$select=facility_id,restaurant_name,address,zip_code,min(inspection_date) as first_inspection&$group=facility_id,restaurant_name,address,zip_code&$having=${encodeURIComponent(inspectionWhere)}&$limit=200`;
+          const inspectionUrl = `https://data.austintexas.gov/resource/ecmv-9xxi.json${inspectionQuery}`;
+          const inspectionRes = await fetch(inspectionUrl);
+          if (inspectionRes.ok) {
+            newInspectionData = await inspectionRes.json();
+          } else {
+            console.warn('Food inspection response error:', inspectionRes.status, await inspectionRes.text().catch(() => ''));
+          }
+        } catch (err) {
+          console.warn('Food inspection search error:', err);
         }
       }
       
-      // Transform TABC license data
+      // Transform TABC issued license data
       const tabcTransformedPromises = filteredTabc.map(async (item) => {
         const transformed = {
           source: 'TABC License',
@@ -482,29 +516,21 @@ export default function ProspectingApp() {
           total_receipts: 0,
         };
 
-        // Check for sales data by address since we may not have exact business name
         try {
           const searchAddress = (item.original_address1 || item.address || "").toUpperCase();
-          
           if (searchAddress) {
-            // Try to find any business at this address
             const where = `upper(location_address) LIKE '%${searchAddress.split(' ')[0]}%' AND upper(location_city) LIKE '%AUSTIN%'`;
             const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
               `${DATE_FIELD} DESC`
             )}&$limit=12`;
-
             const salesRes = await fetch(`${BASE_URL}${query}`);
             if (salesRes.ok) {
               const salesData = await salesRes.json();
-              
               if (salesData.length > 0) {
                 transformed.has_sales = true;
                 const recent = salesData[0];
                 transformed.total_receipts = Number(recent.total_receipts || 0);
-                // Update with actual business name if we found one
-                if (recent.location_name) {
-                  transformed.location_name = recent.location_name;
-                }
+                if (recent.location_name) transformed.location_name = recent.location_name;
               }
             }
           }
@@ -515,10 +541,68 @@ export default function ProspectingApp() {
         return transformed;
       });
 
-      // Combine results from both sources
+      // Transform TABC pending application data
+      const pendingTransformedPromises = pendingTabcData.map(async (item) => {
+        const transformed = {
+          source: 'TABC Pending',
+          location_name: item.trade_name || item.owner || "Unknown",
+          location_address: item.address || "",
+          location_city: item.city || "",
+          location_zip: item.zip || "",
+          license_type: item.license_type || "",
+          application_id: item.applicationid || "",
+          submission_date: item.submission_date || "",
+          application_status: item.applicationstatus || "",
+          taxpayer_number: `PENDING-${item.applicationid || ''}`,
+          location_number: "1",
+          has_sales: false,
+          total_receipts: 0,
+        };
+
+        // Check for sales data to see if this is truly new
+        try {
+          const searchName = (item.trade_name || "").toUpperCase();
+          const searchCity = (item.city || "").toUpperCase();
+          if (searchName && searchCity) {
+            const where = buildSocrataWhere(searchName, searchCity);
+            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=6`;
+            const salesRes = await fetch(`${BASE_URL}${query}`);
+            if (salesRes.ok) {
+              const salesData = await salesRes.json();
+              const exactMatch = salesData.filter(row => (row.location_name || '').toUpperCase() === searchName);
+              if (exactMatch.length > 0) {
+                transformed.has_sales = true;
+                transformed.total_receipts = Number(exactMatch[0].total_receipts || 0);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Error checking sales for pending app', item.trade_name, err);
+        }
+
+        return transformed;
+      });
+
+      // Transform Food Establishment first-inspection data (Austin only)
+      const inspectionTransformed = newInspectionData.map((item) => ({
+        source: 'First Inspection',
+        location_name: item.restaurant_name || "Unknown",
+        location_address: item.address || "",
+        location_city: "AUSTIN",
+        location_zip: item.zip_code || "",
+        facility_id: item.facility_id || "",
+        first_inspection: item.first_inspection || "",
+        taxpayer_number: `INSPECT-${item.facility_id || ''}`,
+        location_number: "1",
+        has_sales: false,
+        total_receipts: 0,
+      }));
+
+      // Combine results from all sources
       const tabcResults = await Promise.all(tabcTransformedPromises);
       const permitResults = await Promise.all(permitTransformedPromises);
-      const allResults = [...tabcResults, ...permitResults];
+      const pendingResults = await Promise.all(pendingTransformedPromises);
+      const allResults = [...tabcResults, ...permitResults, ...pendingResults, ...inspectionTransformed];
       
       setNroResults(allResults);
     } catch (err) {
@@ -4390,6 +4474,16 @@ export default function ProspectingApp() {
                                 PERMIT
                               </span>
                             )}
+                            {item.source === 'TABC Pending' && (
+                              <span className="text-yellow-400 font-black text-[8px] px-1.5 py-0.5 bg-yellow-500/10 rounded border border-yellow-500/30 whitespace-nowrap">
+                                PENDING
+                              </span>
+                            )}
+                            {item.source === 'First Inspection' && (
+                              <span className="text-purple-400 font-black text-[8px] px-1.5 py-0.5 bg-purple-500/10 rounded border border-purple-500/30 whitespace-nowrap">
+                                NEW OPEN
+                              </span>
+                            )}
                             {item.has_sales ? (
                               <span className="text-emerald-400 font-black text-xs px-2 py-0.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30 whitespace-nowrap">
                                 {formatCurrency(item.total_receipts)}
@@ -4417,6 +4511,24 @@ export default function ProspectingApp() {
                                     {item.work_class}
                                   </div>
                                 )}
+                              </>
+                            ) : item.source === 'TABC Pending' ? (
+                              <>
+                                <div className="text-[9px] font-bold text-yellow-400">
+                                  {item.license_type} — {item.application_status}
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-400">
+                                  Submitted: {new Date(item.submission_date).toLocaleDateString()}
+                                </div>
+                              </>
+                            ) : item.source === 'First Inspection' ? (
+                              <>
+                                <div className="text-[9px] font-bold text-purple-400">
+                                  First Inspection
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-400">
+                                  {new Date(item.first_inspection).toLocaleDateString()}
+                                </div>
                               </>
                             ) : (
                               <>
@@ -5243,6 +5355,9 @@ export default function ProspectingApp() {
                       </button>
                       <button
                         onClick={async () => {
+                          // Open the window synchronously before any await so iOS Safari won't block it
+                          const win = window.open('', '_blank');
+
                           const waypointCoords = [];
                           
                           // Add custom start point as first waypoint if set
@@ -5278,7 +5393,9 @@ export default function ProspectingApp() {
                           }
                           
                           if (waypointCoords.length > 0) {
-                            window.open(`https://www.google.com/maps/dir/${waypointCoords.join('/')}`, '_blank');
+                            win.location.href = `https://www.google.com/maps/dir/${waypointCoords.join('/')}`;
+                          } else if (win) {
+                            win.close();
                           }
                         }}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl shadow-refined hover:shadow-refined-lg transition-all duration-200 hover:scale-[1.02]"
@@ -5456,6 +5573,10 @@ export default function ProspectingApp() {
                             </div>
                             <button
                               onClick={async () => {
+                                // Open the window synchronously (must happen before any await,
+                                // otherwise iOS Safari's popup blocker will suppress it)
+                                const win = window.open('', '_blank');
+
                                 const waypointCoords = [];
                                 
                                 // Add custom start point if available
@@ -5484,7 +5605,9 @@ export default function ProspectingApp() {
                                 }
                                 
                                 if (waypointCoords.length > 0) {
-                                  window.open(`https://www.google.com/maps/dir/${waypointCoords.join('/')}`, '_blank');
+                                  win.location.href = `https://www.google.com/maps/dir/${waypointCoords.join('/')}`;
+                                } else if (win) {
+                                  win.close();
                                 }
                               }}
                               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl transition-all shadow-refined hover:shadow-refined-lg hover:scale-[1.02]"
@@ -5775,45 +5898,67 @@ export default function ProspectingApp() {
                     Historical Volume
                   </h3>
 
-                  <div ref={historicalChartRef} className="h-[260px] min-h-[260px] w-full min-w-0 mt-2">
-                    {historicalChartWidth > 0 && (
-                      <BarChart
-                        width={historicalChartWidth}
-                        height={260}
-                        data={selectedEstablishment.history || []}
-                        margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
-                      >
-                        <CartesianGrid vertical={false} stroke="#ffffff08" />
-                        <XAxis
-                          dataKey="month"
-                          tick={{ fontSize: 10, fill: "#64748b", fontWeight: 800 }}
-                          axisLine={false}
-                          tickLine={false}
-                          dy={10}
-                        />
-                        <YAxis 
-                          tick={{ fontSize: 10, fill: "#64748b", fontWeight: 800 }}
-                          axisLine={false}
-                          tickLine={false}
-                          domain={[0, "auto"]}
-                          tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                        />
-                        <RechartsTooltip
-                          cursor={{ fill: "#ffffff08" }}
-                          contentStyle={{
-                            backgroundColor: "#0F172A",
-                            border: "1px solid #1e293b",
-                            borderRadius: "12px",
-                            fontSize: "10px",
-                          }}
-                          formatter={(value) => formatCurrency(value)}
-                        />
-                        <Bar dataKey="liquor" stackId="a" fill="#6366f1" stroke="#6366f1" fillOpacity={1} />
-                        <Bar dataKey="beer" stackId="a" fill="#10b981" stroke="#10b981" fillOpacity={1} />
-                        <Bar dataKey="wine" stackId="a" fill="#ec4899" stroke="#ec4899" fillOpacity={1} />
-                      </BarChart>
-                    )}
-                  </div>
+                  {(() => {
+                    const history = selectedEstablishment.history || [];
+                    const hasBreakdown = history.some(h => h.liquor > 0 || h.beer > 0 || h.wine > 0);
+                    const hasAnyData = history.some(h => h.total > 0);
+
+                    if (history.length === 0 || !hasAnyData) {
+                      return (
+                        <div ref={historicalChartRef} className="h-[260px] min-h-[260px] w-full min-w-0 mt-2 flex items-center justify-center text-slate-600 text-[11px] font-black uppercase tracking-widest">
+                          No Sales Data Available
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div ref={historicalChartRef} className="h-[260px] min-h-[260px] w-full min-w-0 mt-2">
+                        {historicalChartWidth > 0 && (
+                          <BarChart
+                            width={historicalChartWidth}
+                            height={260}
+                            data={history}
+                            margin={{ top: 10, right: 20, left: 10, bottom: 10 }}
+                          >
+                            <CartesianGrid vertical={false} stroke="#ffffff08" />
+                            <XAxis
+                              dataKey="month"
+                              tick={{ fontSize: 10, fill: "#64748b", fontWeight: 800 }}
+                              axisLine={false}
+                              tickLine={false}
+                              dy={10}
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: "#64748b", fontWeight: 800 }}
+                              axisLine={false}
+                              tickLine={false}
+                              domain={[0, "auto"]}
+                              tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                            />
+                            <RechartsTooltip
+                              cursor={{ fill: "#ffffff08" }}
+                              contentStyle={{
+                                backgroundColor: "#0F172A",
+                                border: "1px solid #1e293b",
+                                borderRadius: "12px",
+                                fontSize: "10px",
+                              }}
+                              formatter={(value) => formatCurrency(value)}
+                            />
+                            {hasBreakdown ? (
+                              <>
+                                <Bar dataKey="liquor" stackId="a" fill="#6366f1" stroke="#6366f1" fillOpacity={1} />
+                                <Bar dataKey="beer" stackId="a" fill="#10b981" stroke="#10b981" fillOpacity={1} />
+                                <Bar dataKey="wine" stackId="a" fill="#ec4899" stroke="#ec4899" fillOpacity={1} />
+                              </>
+                            ) : (
+                              <Bar dataKey="total" fill="#06b6d4" stroke="#06b6d4" fillOpacity={1} radius={[4, 4, 0, 0]} />
+                            )}
+                          </BarChart>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
