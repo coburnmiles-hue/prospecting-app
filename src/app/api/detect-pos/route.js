@@ -22,7 +22,45 @@ const POS_SIGNATURES = [
   { name: "Lavu",         patterns: ["poslavu.com"] },
   { name: "Owner.com",    patterns: ["owner.com"] },
   { name: "PopMenu",      patterns: ["popmenu.com"] },
+  { name: "Flipdish",     patterns: ["flipdish.com", "order.flipdish.com"] },
+  { name: "Deliverect",   patterns: ["deliverect.com", "order.deliverect.com"] },
+  { name: "ChowNow",      patterns: ["chownow.com", "ordering.chownow.com"] },
+  { name: "Menufy",       patterns: ["menufy.com"] },
+  { name: "Slice",        patterns: ["slicelife.com", "slice.com"] },
+  { name: "Allset",       patterns: ["allsetnow.com"] },
+  { name: "Zuppler",      patterns: ["zuppler.com"] },
 ];
+
+// Simple in-memory cache with TTL (30 minutes)
+const posCache = new Map();
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+function getCacheKey(name, city, website, menuUrl) {
+  return `${name || ''}|${city || ''}|${website || ''}|${menuUrl || ''}`;
+}
+
+function getCachedResult(cacheKey) {
+  const cached = posCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.result;
+  }
+  if (cached) {
+    posCache.delete(cacheKey); // Remove expired entry
+  }
+  return null;
+}
+
+function setCachedResult(cacheKey, result) {
+  posCache.set(cacheKey, {
+    result,
+    timestamp: Date.now()
+  });
+  // Keep cache size manageable
+  if (posCache.size > 1000) {
+    const oldestKey = posCache.keys().next().value;
+    posCache.delete(oldestKey);
+  }
+}
 
 // SSRF prevention: block requests to private/loopback IP ranges
 function isPrivateHost(hostname) {
@@ -155,25 +193,43 @@ async function fetchAndScan(url, sourceLabel) {
       !["http:", "https:"].includes(parsedUrl.protocol) ||
       isPrivateHost(parsedUrl.hostname)
     ) return null;
+    
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
+    const timer = setTimeout(() => controller.abort(), 4000); // Reduced timeout
+    
     try {
       const res = await fetch(url, {
         signal: controller.signal,
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; PocketProspector/1.0)", Accept: "text/html" },
+        headers: { 
+          "User-Agent": "Mozilla/5.0 (compatible; PocketProspector/1.0)", 
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Encoding": "gzip, deflate, br"
+        },
         redirect: "follow",
       });
       clearTimeout(timer);
+      
       if (!res.ok) return null;
+      
+      // Stream with size limit to improve performance
       const reader = res.body.getReader();
       let html = "";
       let bytes = 0;
-      while (bytes < 200_000) {
+      const maxBytes = 100_000; // Reduced from 200KB to 100KB
+      
+      while (bytes < maxBytes) {
         const { done, value } = await reader.read();
         if (done) break;
-        html += new TextDecoder().decode(value);
+        html += new TextDecoder().decode(value, { stream: true });
         bytes += value.byteLength;
+        
+        // Early exit if we already found POS signatures
+        if (bytes > 50_000 && scanForPos(html)) {
+          reader.cancel().catch(() => {});
+          return { pos: scanForPos(html), source: sourceLabel };
+        }
       }
+      
       reader.cancel().catch(() => {});
       const detected = scanForPos(html);
       return detected ? { pos: detected, source: sourceLabel } : null;
@@ -198,48 +254,60 @@ export async function GET(req) {
       return Response.json({ pos: "Unknown", source: null });
     }
 
+    // Check cache first
+    const cacheKey = getCacheKey(name, city, website, menuUrl);
+    const cachedResult = getCachedResult(cacheKey);
+    if (cachedResult) {
+      return Response.json(cachedResult);
+    }
+
+    let result = { pos: "Unknown", source: null };
+
     // --- Pass 1: check if the menuUrl itself is a POS/ordering platform (highest signal) ---
     if (menuUrl) {
       const menuUrlDetected = scanForPos(menuUrl);
       if (menuUrlDetected) {
-        return Response.json({ pos: menuUrlDetected, source: "Google ordering link" });
+        result = { pos: menuUrlDetected, source: "Google ordering link" };
       }
     }
 
     // --- Pass 2: check if the website URL itself is a POS/ordering platform ---
-    if (website) {
+    if (result.pos === "Unknown" && website) {
       const urlDetected = scanForPos(website);
       if (urlDetected) {
-        return Response.json({ pos: urlDetected, source: "ordering page" });
+        result = { pos: urlDetected, source: "ordering page" };
       }
     }
 
     // --- Pass 3: slug probe — construct known ordering URLs and HEAD-check them ---
-    if (name) {
+    if (result.pos === "Unknown" && name) {
       const probeResult = await probeSlugCandidates(name, city);
-      if (probeResult) return Response.json(probeResult);
+      if (probeResult) result = probeResult;
     }
 
     // --- Pass 4: fetch Google ordering/menu page HTML and scan ---
-    if (menuUrl) {
-      const result = await fetchAndScan(menuUrl, "Google ordering link");
-      if (result) return Response.json(result);
+    if (result.pos === "Unknown" && menuUrl) {
+      const htmlResult = await fetchAndScan(menuUrl, "Google ordering link");
+      if (htmlResult) result = htmlResult;
     }
 
     // --- Pass 5: fetch website HTML and scan for embedded POS signatures ---
-    if (website) {
-      const result = await fetchAndScan(website, "website");
-      if (result) return Response.json(result);
+    if (result.pos === "Unknown" && website) {
+      const htmlResult = await fetchAndScan(website, "website");
+      if (htmlResult) result = htmlResult;
     }
 
     // --- Pass 6: Gemini AI + Google Search grounding (last resort) ---
-    if (name) {
+    if (result.pos === "Unknown" && name) {
       const searchResult = await detectViaGeminiSearch(name, city);
-      if (searchResult) return Response.json(searchResult);
+      if (searchResult) result = searchResult;
     }
 
-    return Response.json({ pos: "Unknown", source: null });
-  } catch {
+    // Cache the result
+    setCachedResult(cacheKey, result);
+    return Response.json(result);
+  } catch (error) {
+    console.error('POS detection error:', error);
     return Response.json({ pos: "Unknown", source: null });
   }
 }

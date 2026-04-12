@@ -39,9 +39,15 @@ export function pseudoLatLng(seed) {
 }
 
 export function parseSavedNotes(raw) {
-  const s = (raw || "").toString();
+  let p;
   try {
-    const p = JSON.parse(s);
+    // Handle both string (text column) and object (JSONB column from Neon)
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      p = raw;
+    } else {
+      const s = (raw || "").toString();
+      p = JSON.parse(s);
+    }
     return {
       key: (p?.key || p?.key?.toString() || "").replace(/^KEY:/, "") || (p?.key ? p.key : undefined),
       notes: Array.isArray(p?.notes) ? p.notes : [],
@@ -51,6 +57,7 @@ export function parseSavedNotes(raw) {
       activeOpp: p?.activeOpp ?? false,
       activeAccount: p?.activeAccount ?? false,
       referral: p?.referral ?? false,
+      hotLead: p?.hotLead ?? false,
       activeOppDate: p?.activeOppDate || null,
       activeAccountDate: p?.activeAccountDate || null,
       wonGpv: p?.wonGpv || null,
@@ -64,8 +71,9 @@ export function parseSavedNotes(raw) {
       raw: p,
     };
   } catch (e) {
+    const s = (raw || "").toString();
     const m = s.match(/KEY:([^\s",}]+)/);
-    return { key: m ? m[1] : undefined, notes: [], followups: [], history: [], activeOpp: false, activeAccount: false, referral: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
+    return { key: m ? m[1] : undefined, notes: [], followups: [], history: [], activeOpp: false, activeAccount: false, referral: false, hotLead: false, activeOppDate: null, activeAccountDate: null, wonGpv: null, wonArr: null, wonDateSigned: null, venueType: null, venueTypeLocked: false, aiResponse: "", businessHours: null, businessWebsite: null, raw: s };
   }
 }
 

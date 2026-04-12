@@ -7,6 +7,8 @@ export default function GpvTierPanel({
   onToggleActiveAccount,
   selectedReferral,
   onToggleReferral,
+  selectedHotLead,
+  onToggleHotLead,
   wonGpv,
   setWonGpv,
   wonArr,
@@ -80,6 +82,16 @@ export default function GpvTierPanel({
               style={{ borderColor: selectedReferral ? "#a855f7" : "#334155" }}
             >
               Referral
+            </button>
+
+            <button
+              onClick={onToggleHotLead}
+              className={`flex-1 min-w-[90px] px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
+                selectedHotLead ? "bg-orange-500 text-white" : "opacity-70"
+              }`}
+              style={{ borderColor: selectedHotLead ? "#f97316" : "#334155" }}
+            >
+              🔥 Hot Lead
             </button>
           </div>
         </div>

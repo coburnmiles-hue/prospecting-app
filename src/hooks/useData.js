@@ -118,6 +118,13 @@ export function useCalculatedMetrics() {
             if (notes?.notes && Array.isArray(notes.notes)) {
               notes.notes.forEach(note => {
                 try {
+                  // All-time counts (all notes regardless of date)
+                  if (note.activity_type === 'walk-in') {
+                    allTimeWalkIns++;
+                  } else {
+                    allTimeTouches++;
+                  }
+
                   const noteDate = new Date(note.created_at);
                   if (noteDate >= monthStart && noteDate <= monthEnd) {
                     if (note.activity_type === 'walk-in') {
@@ -142,6 +149,11 @@ export function useCalculatedMetrics() {
               } catch (e) {
                 // skip invalid dates
               }
+            }
+
+            // All-time opps: any account currently flagged as active opp
+            if (notes?.activeOpp) {
+              allTimeOpps++;
             }
 
             // Count closed won turned on this month and collect won account details
@@ -202,6 +214,9 @@ export function useCalculatedMetrics() {
           totalArr,
           // All-time metrics
           allTime: {
+            walkIns: allTimeWalkIns,
+            touches: allTimeTouches,
+            opps: allTimeOpps,
             closedWon: allTimeClosedWon,
             wonAccounts: allTimeWonAccounts,
             totalGpv: allTimeTotalGpv,

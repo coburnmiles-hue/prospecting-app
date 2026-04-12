@@ -209,6 +209,7 @@ export default function ProspectingApp() {
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
   const [selectedActiveAccount, setSelectedActiveAccount] = useState(false);
   const [selectedReferral, setSelectedReferral] = useState(false);
+  const [selectedHotLead, setSelectedHotLead] = useState(false);
   const [wonGpv, setWonGpv] = useState('');
   const [wonArr, setWonArr] = useState('');
   const [wonDateSigned, setWonDateSigned] = useState('');
@@ -258,7 +259,9 @@ export default function ProspectingApp() {
   const [showUnvisitedOnly, setShowUnvisitedOnly] = useState(false);
   const [showNroOnly, setShowNroOnly] = useState(false);
   const [showReferralOnly, setShowReferralOnly] = useState(false);
+  const [showHotLeadOnly, setShowHotLeadOnly] = useState(false);
   const [showOpenOnly, setShowOpenOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const [customDayFilter, setCustomDayFilter] = useState(null); // 0-6 (Sunday-Saturday)
   const [customHourFilter, setCustomHourFilter] = useState(""); // 1-12
   const [customPeriodFilter, setCustomPeriodFilter] = useState("AM"); // AM or PM
@@ -893,6 +896,8 @@ export default function ProspectingApp() {
       setSelectedActiveOpp(false);
       setSelectedActiveAccount(false);
       setSelectedReferral(false);
+      setSelectedHotLead(false);
+      setSelectedHotLead(false);
       setWonGpv('');
       setWonArr('');
       setWonDateSigned('');
@@ -912,6 +917,7 @@ export default function ProspectingApp() {
       setSelectedActiveOpp(parsed?.activeOpp || false);
       setSelectedActiveAccount(parsed?.activeAccount || false);
       setSelectedReferral(parsed?.referral || false);
+      setSelectedHotLead(parsed?.hotLead || false);
       setWonGpv(parsed?.wonGpv || '');
       setWonArr(parsed?.wonArr || '');
       setWonDateSigned(parsed?.wonDateSigned || '');
@@ -1102,6 +1108,9 @@ export default function ProspectingApp() {
             if (parsed?.referral !== selectedReferral) {
               setSelectedReferral(parsed?.referral || false);
             }
+            if (parsed?.hotLead !== selectedHotLead) {
+              setSelectedHotLead(parsed?.hotLead || false);
+            }
             if (parsed?.venueType && parsed.venueType !== venueType) {
               setVenueType(parsed.venueType);
             }
@@ -1201,6 +1210,7 @@ export default function ProspectingApp() {
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
           setSelectedReferral(parsed?.referral || false);
+          setSelectedHotLead(parsed?.hotLead || false);
           if (parsed?.venueType) {
             setVenueType(parsed.venueType);
           }
@@ -1253,7 +1263,6 @@ export default function ProspectingApp() {
 
       const text = (bodyJson && (bodyJson.text || (bodyJson.raw && bodyJson.raw?.candidates?.[0]?.content?.parts?.[0]?.text))) || "";
       const finalText = String(text || "No response received.").trim();
-      console.log('AI Intel Response:', finalText);
       if (updateState) setAiResponse(finalText);
       return finalText;
     } catch (err) {
@@ -1406,20 +1415,16 @@ export default function ProspectingApp() {
       if (!L) return;
 
       // Initialize map for each route
-      savedRoutes.forEach((route) => {
+      for (const route of savedRoutes) {
         const mapId = `route-map-${route.id}`;
         const mapElement = document.getElementById(mapId);
-        
-        if (!mapElement || mapElement._leaflet_id) return; // Skip if already initialized
+
+        if (!mapElement || mapElement._leaflet_id) continue; // Skip if already initialized
 
         try {
           let routeData = route.route_data;
           if (typeof routeData === 'string') {
-            try {
-              routeData = JSON.parse(routeData);
-            } catch {
-              routeData = {};
-            }
+            try { routeData = JSON.parse(routeData); } catch { routeData = {}; }
           }
           routeData = routeData || {};
 
@@ -1451,34 +1456,50 @@ export default function ProspectingApp() {
             ? routeData.stops
             : (Array.isArray(routeData.accounts) ? routeData.accounts : []);
 
-          const fallbackPolyline = stops
-            .map((stop) => [Number(stop?.lat), Number(stop?.lng)])
-            .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+          const validStops = stops.filter(s => Number.isFinite(Number(s?.lat)) && Number.isFinite(Number(s?.lng)));
 
-          const displayPolyline = Array.isArray(routeData.polyline) && routeData.polyline.length > 0
-            ? routeData.polyline
-            : fallbackPolyline;
-
-          // Draw route if available
-          if (displayPolyline.length > 0) {
-            const routeLine = L.polyline(displayPolyline, {
+          const drawPolyline = (points) => {
+            if (!points || points.length === 0) return;
+            const routeLine = L.polyline(points, {
               color: '#10b981',
               weight: 3,
               opacity: 0.9,
             }).addTo(map);
-
-            // Fit bounds to show entire route
             map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
-          }
+            setTimeout(() => map.invalidateSize(), 100);
+          };
 
-          // Force map size recalculation
-          setTimeout(() => {
-            map.invalidateSize();
-          }, 100);
+          // Use stored road polyline if available, otherwise fetch from directions API
+          if (Array.isArray(routeData.polyline) && routeData.polyline.length > 0) {
+            drawPolyline(routeData.polyline);
+          } else if (validStops.length >= 2) {
+            // Fetch real road directions for this route
+            fetch('/api/route', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ waypoints: validStops, origin: validStops[0] }),
+            })
+              .then(r => r.ok ? r.json() : null)
+              .then(data => {
+                if (data?.polyline?.length > 0) {
+                  drawPolyline(data.polyline);
+                } else {
+                  // Last resort: straight lines
+                  drawPolyline(validStops.map(s => [Number(s.lat), Number(s.lng)]));
+                }
+              })
+              .catch(() => {
+                drawPolyline(validStops.map(s => [Number(s.lat), Number(s.lng)]));
+              });
+          } else {
+            // Not enough stops to draw anything meaningful
+            setTimeout(() => map.invalidateSize(), 100);
+          }
         } catch (error) {
           console.error('Error initializing route map:', error);
         }
-      });
+      }
     };
 
     // Delay initialization to ensure DOM is ready
@@ -1648,26 +1669,19 @@ export default function ProspectingApp() {
     // Wait for map to be fully initialized before attempting geolocation
     const timeout = setTimeout(() => {
       if (!mapInstance.current) {
-        console.log('Map still not ready');
         return;
       }
 
-      console.log('Attempting to get geolocation...');
 
       // Get current location and zoom to it
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
-            console.log('Got position:', position.coords.latitude, position.coords.longitude);
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             
             if (mapInstance.current && window.L) {
-              console.log('Setting view to:', lat, lng);
               mapInstance.current.setView([lat, lng], 15);
-              console.log('View set successfully');
-            } else {
-              console.log('Map or L not available');
             }
           },
           (err) => {
@@ -1684,8 +1698,6 @@ export default function ProspectingApp() {
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
-      } else {
-        console.log('Geolocation not supported');
       }
     }, 1500); // Wait 1.5 seconds for map to initialize
 
@@ -2274,6 +2286,9 @@ export default function ProspectingApp() {
       // If 'show referral only' is enabled, skip any non-referral pins
       if (showReferralOnly && !parsed?.referral) return;
 
+      // If 'show hot lead only' is enabled, skip any non-hot-lead pins
+      if (showHotLeadOnly && !parsed?.hotLead) return;
+
       // If 'show NRO only' is enabled, only show NRO tier pins
       if (showNroOnly) {
         if (tier !== 'nro') return;
@@ -2572,6 +2587,9 @@ export default function ProspectingApp() {
           <button onclick="window.dispatchEvent(new CustomEvent('prospect:viewDetails',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#0b1220;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #374151;margin-bottom:8px;">
             View Details
           </button>
+          <button onclick="window.dispatchEvent(new CustomEvent('prospect:toggleHotLeadById',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:${parsed?.hotLead ? '#f97316' : '#0b1220'};color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid ${parsed?.hotLead ? '#f97316' : '#374151'};margin-bottom:8px;">
+            🔥 ${parsed?.hotLead ? 'Hot Lead ✓' : 'Hot Lead'}
+          </button>
           <button onclick="window.dispatchEvent(new CustomEvent('prospect:removePin',{detail:{id:${row.id != null ? JSON.stringify(row.id) : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#7f1d1d;color:white;padding:10px;border-radius:10px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #991b1b;">
             Remove Pin
           </button>
@@ -2760,15 +2778,44 @@ export default function ProspectingApp() {
       if (!name) return;
       setPosLoading(true);
       setPosSystem(null);
+      
       const params = new URLSearchParams({ name });
       if (city) params.set('city', city);
       if (website) params.set('website', website);
       if (menuUri) params.set('menuUrl', menuUri);
-      fetch(`/api/detect-pos?${params}`)
-        .then(r => r.json())
-        .then(d => setPosSystem(d))
-        .catch(() => setPosSystem({ pos: 'Unknown', source: null }))
-        .finally(() => setPosLoading(false));
+      
+      // Add retry logic with exponential backoff
+      const maxRetries = 2;
+      let retryCount = 0;
+      
+      const attemptDetection = async () => {
+        try {
+          const response = await fetch(`/api/detect-pos?${params}`);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          setPosSystem(data);
+        } catch (error) {
+          console.warn(`POS detection attempt ${retryCount + 1} failed:`, error.message);
+          
+          if (retryCount < maxRetries) {
+            retryCount++;
+            // Exponential backoff: 1s, 2s
+            const delay = Math.pow(2, retryCount - 1) * 1000;
+            setTimeout(attemptDetection, delay);
+          } else {
+            // Final fallback
+            setPosSystem({ pos: 'Unknown', source: null });
+          }
+        } finally {
+          if (retryCount === 0 || (retryCount >= maxRetries)) {
+            setPosLoading(false);
+          }
+        }
+      };
+      
+      attemptDetection();
     };
 
     const fetchHours = async () => {
@@ -2885,7 +2932,6 @@ export default function ProspectingApp() {
     }
     
     setSearchingRestaurants(true);
-    console.log(`Searching for ${placeType}s near ${lat}, ${lng}`);
     try {
       const response = await fetch(
         `/api/nearby-places?lat=${lat}&lng=${lng}&radius=5000&type=${placeType}`,
@@ -2905,7 +2951,6 @@ export default function ProspectingApp() {
       
       const data = await response.json();
       if (!data.results || data.results.length === 0) {
-        console.log('No restaurants found');
         clearRestaurantMarkers();
         return;
       }
@@ -2988,7 +3033,6 @@ export default function ProspectingApp() {
       
       restaurantMarkersRef.current = newMarkers;
       setRestaurantMarkers(newMarkers);
-      console.log(`Found ${newMarkers.length} new restaurants to display`);
     } catch (error) {
       console.error('Restaurant search error:', error?.message || String(error));
     } finally {
@@ -3092,7 +3136,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showReferralOnly, showOpenOnly, customFilterActive]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showReferralOnly, showHotLeadOnly, showOpenOnly, customFilterActive]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -3246,13 +3290,41 @@ export default function ProspectingApp() {
       }
     };
 
+    const onToggleHotLeadById = async (e) => {
+      try {
+        const id = e?.detail?.id;
+        if (id == null) return;
+        const account = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => a.id === id);
+        if (!account) return;
+        const parsed = parseSavedNotes(account.notes);
+        const notesObj = (parsed?.raw && typeof parsed.raw === 'object') ? { ...parsed.raw } : {
+          key: parsed.key ? `KEY:${parsed.key}` : '',
+          notes: parsed.notes || [],
+          followups: parsed.followups || [],
+          history: parsed.history || [],
+        };
+        notesObj.hotLead = !notesObj.hotLead;
+        const res = await fetch(`/api/accounts?id=${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error('Could not update hot lead flag');
+        await refreshSavedAccounts();
+      } catch (err) {
+        console.error('toggleHotLeadById handler failed', err);
+      }
+    };
+
     window.addEventListener('prospect:viewDetails', onView);
     window.addEventListener('prospect:removePin', onRemove);
     window.addEventListener('prospect:saveRestaurant', onSaveRestaurant);
+    window.addEventListener('prospect:toggleHotLeadById', onToggleHotLeadById);
     return () => {
       window.removeEventListener('prospect:viewDetails', onView);
       window.removeEventListener('prospect:removePin', onRemove);
       window.removeEventListener('prospect:saveRestaurant', onSaveRestaurant);
+      window.removeEventListener('prospect:toggleHotLeadById', onToggleHotLeadById);
     };
   }, [setViewMode, setSavedSubView, savedAccounts, refreshSavedAccounts, selectedEstablishment, setSelectedEstablishment]);
 
@@ -3461,6 +3533,7 @@ export default function ProspectingApp() {
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
       setSelectedReferral(parsed?.referral || false);
+      setSelectedHotLead(parsed?.hotLead || false);
       if (parsed?.venueType) {
         setVenueType(parsed.venueType);
       }
@@ -3563,6 +3636,7 @@ export default function ProspectingApp() {
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
           setSelectedReferral(parsed?.referral || false);
+          setSelectedHotLead(parsed?.hotLead || false);
           if (parsed?.venueType) {
             setVenueType(parsed.venueType);
           }
@@ -3841,6 +3915,46 @@ export default function ProspectingApp() {
         setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Referral.");
+      }
+    };
+
+    const toggleHotLead = async () => {
+      if (!selectedEstablishment?.info) return;
+      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+        try {
+          const parsed = parseSavedNotes(a.notes);
+          if (parsed?.key && parsed.key === key) return true;
+        } catch {}
+        return false;
+      });
+
+      if (!saved || !saved.id) {
+        setSelectedHotLead((s) => !s);
+        setNotesOwner((o) => ({ ...o, key }));
+        return;
+      }
+
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], hotLead: parsed?.hotLead ?? false };
+        notesObj.hotLead = !notesObj.hotLead;
+
+        const res = await fetch(`/api/accounts?id=${saved.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error("Could not update hot lead flag");
+
+        await refreshSavedAccounts();
+
+        setSelectedHotLead(notesObj.hotLead || false);
+        setNotesOwner({ id: saved.id, key: parsed.key || null });
+      } catch (err) {
+        setError(err?.message || "Could not toggle Hot Lead.");
       }
     };
 
@@ -4796,8 +4910,17 @@ export default function ProspectingApp() {
                     )}
                   </div>
 
-                  {/* Filter Buttons */}
-                  <div className="flex flex-col gap-2">
+                  {/* Filters Collapsible Section */}
+                  <div className="border-t border-slate-700 pt-2">
+                    <button
+                      onClick={() => setFiltersOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
+                    >
+                      <span className="text-[10px] font-black uppercase text-slate-300">Filters</span>
+                      <span className="text-[10px] text-slate-400">{filtersOpen ? '−' : '+'}</span>
+                    </button>
+                    {filtersOpen && (
+                  <div className="flex flex-col gap-2 mt-2">
                     <button
                       onClick={() => setShowSavedPins(v => !v)}
                       title={showSavedPins ? "Hide all saved pins" : "Show all saved pins"}
@@ -4849,6 +4972,17 @@ export default function ProspectingApp() {
                     >
                       <span>Referral</span>
                     </button>
+
+                    <button
+                      onClick={() => setShowHotLeadOnly(v => !v)}
+                      title="Show hot leads only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showHotLeadOnly ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>🔥 Hot Lead</span>
+                    </button>
+                  </div>
+                    )}
                   </div>
 
                   {/* Account Hours Collapsible Section */}
@@ -5411,18 +5545,11 @@ export default function ProspectingApp() {
           ) : viewMode === "metrics" ? (
             <div className="space-y-6">
               {/* Metrics Section */}
-              {calculatedLoading ? (
-                <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
-                  <Loader2 size={40} className="text-indigo-600 animate-spin mb-6" />
-                  <h2 className="text-xl font-black text-white uppercase italic tracking-tighter">Loading Metrics</h2>
-                  <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest mt-2">
-                    Calculating from your activity data...
-                  </p>
-                </div>
-              ) : (
-                <PersonalMetrics 
+              <PersonalMetrics 
                 data={metricsData}
-                calculatedMetrics={calculatedMetrics} 
+                calculatedMetrics={calculatedMetrics}
+                savedAccounts={savedAccounts}
+                refreshSavedAccounts={refreshSavedAccounts}
                 onActivityClick={async (accountId) => {
                   // Switch to saved view and select the account
                   setViewMode('saved');
@@ -5470,7 +5597,6 @@ export default function ProspectingApp() {
                   }
                 }}
               />
-              )}
 
               {/* Saved Routes Section */}
               <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700/50 shadow-refined-lg">
@@ -5696,15 +5822,22 @@ export default function ProspectingApp() {
                         "Clover":         "https://www.clover.com/favicon.ico",
                         "Lightspeed":     "https://www.lightspeedhq.com/favicon.ico",
                         "Olo":            "https://www.olo.com/favicon.ico",
-                        "SpotOn":         "https://spoton.com/favicon.ico",
-                        "Aloha / NCR":    "https://www.ncrvoyix.com/favicon.ico",
+                        "SpotOn":         "https://www.spoton.com/favicon.ico",
+                        "Aloha / NCR":    "https://www.ncr.com/favicon.ico",
                         "TouchBistro":    "https://www.touchbistro.com/favicon.ico",
-                        "BentoBox":       "https://bentobox.com/favicon.ico",
+                        "BentoBox":       "https://www.getbento.com/favicon.ico",
                         "Revel":          "https://revelsystems.com/favicon.ico",
                         "HungerRush":     "https://www.hungerrush.com/favicon.ico",
                         "Lavu":           "https://poslavu.com/favicon.ico",
                         "Owner.com":      "https://www.owner.com/favicon.ico",
                         "PopMenu":        "https://popmenu.com/favicon.ico",
+                        "Flipdish":       "https://www.flipdish.com/favicon.ico",
+                        "Deliverect":     "https://www.deliverect.com/favicon.ico",
+                        "ChowNow":        "https://www.chownow.com/favicon.ico",
+                        "Menufy":         "https://www.menufy.com/favicon.ico",
+                        "Slice":          "https://www.slicelife.com/favicon.ico",
+                        "Allset":         "https://www.allsetnow.com/favicon.ico",
+                        "Zuppler":        "https://www.zuppler.com/favicon.ico",
                       };
                       const logoUrl = posSystem?.pos ? POS_LOGOS[posSystem.pos] : null;
                       return (
@@ -5972,6 +6105,8 @@ export default function ProspectingApp() {
                 onToggleActiveAccount={toggleActiveAccount}
                 selectedReferral={selectedReferral}
                 onToggleReferral={toggleReferral}
+                selectedHotLead={selectedHotLead}
+                onToggleHotLead={toggleHotLead}
                 wonGpv={wonGpv}
                 setWonGpv={setWonGpv}
                 wonArr={wonArr}

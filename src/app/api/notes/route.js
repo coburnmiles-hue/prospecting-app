@@ -14,8 +14,9 @@ async function readNotesRow(sql, accountId, userId) {
 function parseNotesObject(raw) {
   let notesObj = { notes: [], followups: [] };
   try {
-    const parsed = JSON.parse(raw || "");
-    if (parsed && typeof parsed === 'object') {
+    // Neon JSONB columns may return an already-parsed object or a string — handle both
+    const parsed = (raw && typeof raw === 'object') ? raw : JSON.parse(raw || "");
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       notesObj = {
         ...parsed,
         notes: Array.isArray(parsed.notes) ? parsed.notes : [],
@@ -23,7 +24,7 @@ function parseNotesObject(raw) {
       };
     }
   } catch {
-    if (raw && raw.startsWith("KEY:")) {
+    if (raw && typeof raw === 'string' && raw.startsWith("KEY:")) {
       notesObj = { key: raw, notes: [], followups: [] };
     }
   }
@@ -41,8 +42,38 @@ export async function GET(req) {
     const sql = neon(process.env.DATABASE_URL);
     const url = new URL(req.url);
     const accountId = Number(url.searchParams.get("accountId"));
+
+    // No accountId: return all activities for the user, optionally filtered by date (YYYY-MM-DD)
     if (!Number.isFinite(accountId)) {
-      return Response.json({ error: "Valid ?accountId= is required" }, { status: 400 });
+      const date = url.searchParams.get("date") || null;
+      const rows = await sql`
+        SELECT id, name, notes
+        FROM accounts
+        WHERE user_id = ${userId}
+      `;
+      const allActivities = [];
+      rows.forEach(row => {
+        try {
+          const notesObj = parseNotesObject(row.notes || "");
+          (notesObj.notes || []).forEach(note => {
+            // Derive local date (CST = UTC-6) from created_at when created_local_date is absent (legacy notes).
+            // Server runs in UTC so we must NOT use getTimezoneOffset() — it returns 0. Use fixed CST offset.
+            const noteLocalDate = note.created_local_date ||
+              (note.created_at ? new Date(new Date(note.created_at).getTime() - (6 * 60 * 60 * 1000)).toISOString().slice(0, 10) : null);
+            if (!date || noteLocalDate === date) {
+              allActivities.push({
+                ...note,
+                account_id: row.id,
+                account_name: row.name,
+              });
+            }
+          });
+        } catch (e) {
+          // skip invalid rows
+        }
+      });
+      allActivities.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      return Response.json(allActivities, { status: 200 });
     }
 
     const row = await readNotesRow(sql, accountId, userId);
@@ -91,8 +122,8 @@ export async function POST(req) {
 
     const now = new Date();
     const nowIso = now.toISOString();
-    // compute local date (YYYY-MM-DD) by adjusting for timezone offset
-    const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0,10);
+    // compute local CST date (UTC-6). Server runs in UTC so getTimezoneOffset()=0 — use fixed CST offset.
+    const localDate = new Date(now.getTime() - (6 * 60 * 60 * 1000)).toISOString().slice(0, 10);
     const notesObj = parseNotesObject(row.notes || "");
 
     if (entryType === 'followup') {
