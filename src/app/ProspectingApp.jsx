@@ -1864,7 +1864,9 @@ export default function ProspectingApp() {
 
         const marker = L.marker([markerLat, markerLng], { icon: markerIcon }).addTo(topMapInstance.current);
 
-        const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.location_address || row.location_name || '')}`;
+        const mapsUrl = (Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)))
+          ? `https://www.google.com/maps/dir/?api=1&destination=${Number(row.lat)},${Number(row.lng)}`
+          : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.location_address || row.location_name || '')}`;
         const displayName = (row.location_name || row.taxpayer_name || 'Account').toString();
         const displayAddress = (row.location_address || row.location_city || '').toString();
 
@@ -2470,7 +2472,9 @@ export default function ProspectingApp() {
         } catch (e) {}
       } catch (e) {}
 
-      const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.address || "")}`;
+      const mapsUrl = (Number.isFinite(row.lat) && Number.isFinite(row.lng))
+        ? `https://www.google.com/maps/dir/?api=1&destination=${row.lat},${row.lng}`
+        : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(row.address || "")}`;
 
       // Prefer a stable identifier: DB id, or the stored KEY token (after KEY:), else fallback to lat,lng
       const noteToken = (row.notes || "").toString().match(/KEY:([^\s,]+)/)?.[1];
