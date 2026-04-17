@@ -54,6 +54,7 @@ import VolumeAdjuster from "../components/cards/VolumeAdjuster";
 import ActivityLog from "../components/cards/ActivityLog";
 import GpvTierPanel from "../components/cards/GpvTierPanel";
 import PersonalMetrics from "../components/cards/PersonalMetrics";
+import TodayReminders from "../components/cards/TodayReminders";
 
 // Utils and Constants
 import { 
@@ -333,7 +334,8 @@ export default function ProspectingApp() {
 
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
-  }, [selectedEstablishment?.info?.id, viewMode]);
+  // Include taxpayer_number so search results (no id) also trigger a width measurement
+  }, [selectedEstablishment?.info?.id, selectedEstablishment?.info?.taxpayer_number, viewMode]);
 
   // NRO Search handler - searches TABC License Information, Austin building permits,
   // TABC Pending Applications, and Austin Food Inspection first-timers
@@ -3019,7 +3021,19 @@ export default function ProspectingApp() {
               <p style="margin: 0 0 6px 0; font-size: 12px; color: #666;">${place.address}</p>
               ${place.rating ? `<p style="margin: 0 0 6px 0; font-size: 12px;">⭐ ${place.rating.toFixed(1)}</p>` : ''}
               ${place.isOpen !== undefined ? `<p style="margin: 0; font-size: 12px; color: ${place.isOpen ? '#10b981' : '#ef4444'};">${place.isOpen ? '🟢 Open' : '🔴 Closed'}</p>` : ''}
-              <button onclick="window.dispatchEvent(new CustomEvent('prospect:saveRestaurant',{detail:{name:${JSON.stringify(place.name || '')},address:${JSON.stringify(place.address || '')},lat:${Number(place.lat)},lng:${Number(place.lng)},placeId:${JSON.stringify(place.placeId || '')},types:${JSON.stringify(Array.isArray(place.types) ? place.types : [])},rating:${place.rating != null ? Number(place.rating) : 'null'},isOpen:${place.isOpen === true ? 'true' : place.isOpen === false ? 'false' : 'null'}}}))" style="display:block;width:100%;text-align:center;background:#ea580c;color:white;padding:8px;border-radius:8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #fb923c;margin-top:8px;">
+              <button
+                data-place='${JSON.stringify({
+                  name: place.name || '',
+                  address: place.address || '',
+                  lat: Number(place.lat),
+                  lng: Number(place.lng),
+                  placeId: place.placeId || '',
+                  types: Array.isArray(place.types) ? place.types : [],
+                  rating: place.rating != null ? Number(place.rating) : null,
+                  isOpen: place.isOpen === true ? true : place.isOpen === false ? false : null,
+                }).replace(/'/g, "&#39;")}'
+                onclick="var d=JSON.parse(this.getAttribute('data-place'));window.dispatchEvent(new CustomEvent('prospect:saveRestaurant',{detail:d}))"
+                style="display:block;width:100%;text-align:center;background:#ea580c;color:white;padding:8px;border-radius:8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;border:2px solid #fb923c;margin-top:8px;cursor:pointer;">
                 Save Account
               </button>
             </div>
@@ -5592,6 +5606,48 @@ export default function ProspectingApp() {
                           lat: account.lat,
                           lng: account.lng,
                           notes: account.notes, // Include notes for hours/website caching
+                        },
+                        history: Array.isArray(parsed?.history) ? parsed.history : [],
+                      });
+                    } catch (e) {
+                      console.error('Failed to load account:', e);
+                    }
+                  }
+                }}
+              />
+
+              {/* Today's Reminders Section */}
+              <TodayReminders
+                savedAccounts={savedAccounts}
+                onAccountClick={async (accountId) => {
+                  setViewMode('saved');
+                  setSavedSubView('info');
+                  const account = savedAccounts.find(a => a.id === accountId);
+                  if (account) {
+                    try {
+                      const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
+                      const keyParts = parsed?.key ? parsed.key.replace(/^KEY:/, '').split('-') : [];
+                      if (parsed?.aiResponse) {
+                        skipAiLookupRef.current = true;
+                        setAiResponse(parsed.aiResponse);
+                        setAiLoading(false);
+                      } else {
+                        skipAiLookupRef.current = false;
+                        setAiResponse("");
+                      }
+                      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+                      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
+                      setNotesOwner({ id: account.id, key: parsed.key || null });
+                      setSelectedEstablishment({
+                        info: {
+                          id: account.id,
+                          location_name: account.name,
+                          location_address: account.address,
+                          taxpayer_number: keyParts[0] || undefined,
+                          location_number: keyParts[1] || undefined,
+                          lat: account.lat,
+                          lng: account.lng,
+                          notes: account.notes,
                         },
                         history: Array.isArray(parsed?.history) ? parsed.history : [],
                       });
