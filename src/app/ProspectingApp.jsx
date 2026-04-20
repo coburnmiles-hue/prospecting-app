@@ -5704,9 +5704,16 @@ export default function ProspectingApp() {
                                 <button
                                   onClick={() => {
                                     // Load route into map edit mode
-                                    const routeAccountIds = (routeData.stops || routeData.accounts || []).map(a => a.id);
+                                    const stops = (routeData.stops || routeData.accounts || []).map(a => ({
+                                      id: a.id,
+                                      name: a.name,
+                                      lat: a.lat,
+                                      lng: a.lng,
+                                      address: a.address || '',
+                                    }));
                                     mapRoutePlanModeRef.current = true;
-                                    setSelectedIds(routeAccountIds);
+                                    setMapRoutePlanMode(true);
+                                    setMapRouteStops(stops);
                                     setViewMode('map');
                                   }}
                                   className="text-indigo-400 hover:text-indigo-300 text-sm font-bold transition-colors"
