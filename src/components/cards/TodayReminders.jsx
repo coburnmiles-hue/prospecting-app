@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Bell, MapPin, ChevronRight, Clock } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Bell, MapPin, ChevronRight, Clock, ChevronLeft } from "lucide-react";
 
 function formatNoteDate(note) {
   // Prefer the stored local date string, fall back to created_at shifted to CST
@@ -52,8 +52,13 @@ function noteMatchesDay(text, dayIndex) {
 }
 
 export default function TodayReminders({ savedAccounts, onAccountClick }) {
+  const [showTomorrow, setShowTomorrow] = useState(false);
+
   const todayIndex = new Date().getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-  const todayLabel = DAY_LABELS[todayIndex];
+  const tomorrowIndex = (todayIndex + 1) % 7;
+
+  const activeIndex = showTomorrow ? tomorrowIndex : todayIndex;
+  const activeLabel = DAY_LABELS[activeIndex];
 
   const matches = useMemo(() => {
     if (!Array.isArray(savedAccounts) || savedAccounts.length === 0) return [];
@@ -73,7 +78,7 @@ export default function TodayReminders({ savedAccounts, onAccountClick }) {
 
       const allNotes = [...(Array.isArray(parsed.notes) ? parsed.notes : [])];
       const matchingNotes = allNotes.filter((note) =>
-        noteMatchesDay(note.text || "", todayIndex)
+        noteMatchesDay(note.text || "", activeIndex)
       );
 
       if (matchingNotes.length > 0) {
@@ -89,31 +94,46 @@ export default function TodayReminders({ savedAccounts, onAccountClick }) {
     // Sort alphabetically by account name
     result.sort((a, b) => a.name.localeCompare(b.name));
     return result;
-  }, [savedAccounts, todayIndex]);
+  }, [savedAccounts, activeIndex]);
 
   return (
     <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700/50 shadow-refined-lg">
       {/* Header */}
       <div className="flex items-center gap-3 mb-5">
-        <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
-          <Bell size={18} className="text-amber-400" />
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${showTomorrow ? "bg-indigo-500/20" : "bg-amber-500/20"}`}>
+          <Bell size={18} className={showTomorrow ? "text-indigo-400" : "text-amber-400"} />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h2 className="text-xl font-black text-white uppercase italic tracking-tighter leading-none">
-            Today&apos;s Reminders
+            {showTomorrow ? "Tomorrow's Reminders" : "Today's Reminders"}
           </h2>
           <p className="text-slate-400 text-[11px] uppercase tracking-widest mt-0.5">
-            {todayLabel} &mdash; accounts with notes mentioning today
+            {activeLabel} &mdash; accounts with notes mentioning {showTomorrow ? "tomorrow" : "today"}
           </p>
         </div>
+        {/* Toggle button */}
+        <button
+          onClick={() => setShowTomorrow((v) => !v)}
+          className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
+            showTomorrow
+              ? "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"
+              : "bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20"
+          }`}
+        >
+          {showTomorrow ? (
+            <><ChevronLeft size={12} /> Today</>
+          ) : (
+            <>Tomorrow <ChevronRight size={12} /></>
+          )}
+        </button>
       </div>
 
       {matches.length === 0 ? (
         <div className="text-center py-8 text-slate-500">
           <Bell size={28} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No notes mention {todayLabel}.</p>
+          <p className="text-sm">No notes mention {activeLabel}.</p>
           <p className="text-[11px] mt-1 text-slate-600">
-            Add notes like &ldquo;owner in on {todayLabel.toLowerCase()} mornings&rdquo; to see reminders here.
+            Add notes like &ldquo;owner in on {activeLabel.toLowerCase()} mornings&rdquo; to see reminders here.
           </p>
         </div>
       ) : (
@@ -176,7 +196,7 @@ export default function TodayReminders({ savedAccounts, onAccountClick }) {
           ))}
 
           <p className="text-[10px] text-slate-600 text-center pt-1">
-            {matches.length} account{matches.length !== 1 ? "s" : ""} with {todayLabel} reminders
+            {matches.length} account{matches.length !== 1 ? "s" : ""} with {activeLabel} reminders
           </p>
         </div>
       )}
