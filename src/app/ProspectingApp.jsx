@@ -55,6 +55,7 @@ import ActivityLog from "../components/cards/ActivityLog";
 import GpvTierPanel from "../components/cards/GpvTierPanel";
 import PersonalMetrics from "../components/cards/PersonalMetrics";
 import TodayReminders from "../components/cards/TodayReminders";
+import TerritoryPanel from "../components/cards/TerritoryPanel";
 
 // Utils and Constants
 import { 
@@ -158,11 +159,13 @@ export default function ProspectingApp() {
   } = useTopLeaders();
 
   // NRO Search (New Retail Opportunities)
+  const [nroSubView, setNroSubView] = useState("search"); // "search" | "territory"
   const [nroSearchTerm, setNroSearchTerm] = useState("");
   const [nroSearchType, setNroSearchType] = useState("city"); // city, county, or zip
   const [nroResults, setNroResults] = useState([]);
   const [nroLoading, setNroLoading] = useState(false);
   const [nroError, setNroError] = useState("");
+  const [territoryUnacknowledgedCount, setTerritoryUnacknowledgedCount] = useState(0);
 
   // Combine loading and error states for backward compatibility
   const [localLoading, setLoading] = useState(false);
@@ -695,8 +698,9 @@ export default function ProspectingApp() {
     return savedAccounts.some((a) => `${a.notes || ""}`.includes(key) || false);
   };
 
-  const toggleSaveAccount = async () => {
+  const toggleSaveAccount = async (gpvTierOverride) => {
     if (!selectedEstablishment?.info) return;
+    const effectiveTier = gpvTierOverride ?? selectedGpvTier;
 
     // This version uses Neon as a simple “saved pins” store.
     // Your table is: accounts(id, name, address, lat, lng, notes, created_at)
@@ -767,7 +771,7 @@ export default function ProspectingApp() {
       }
 
       // Require GPV tier to be selected before saving a new account
-      if (!selectedGpvTier) {
+      if (!effectiveTier) {
         setError("Please select a GPV Tier before saving this account.");
         return;
       }
@@ -793,7 +797,7 @@ export default function ProspectingApp() {
           key: `KEY:${key}`, 
           notes: Array.isArray(notesToPersist) ? notesToPersist : [], 
           history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], 
-          gpvTier: selectedGpvTier, 
+          gpvTier: effectiveTier, 
           activeOpp: selectedActiveOpp, 
           venueType: venueType, 
           venueTypeLocked: venueTypeLocked,
@@ -1380,6 +1384,21 @@ export default function ProspectingApp() {
       fetchSavedRoutes();
     }
   }, [viewMode]);
+
+  // Load territory unacknowledged count on mount (for alert badge)
+  useEffect(() => {
+    const loadTerritoryCount = async () => {
+      try {
+        const res = await fetch("/api/territory", { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        setTerritoryUnacknowledgedCount(data.unacknowledged_count || 0);
+      } catch {
+        // silently ignore
+      }
+    };
+    loadTerritoryCount();
+  }, []);
 
   // Initialize background maps for saved routes
   useEffect(() => {
@@ -4036,7 +4055,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v5.0.15</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v6.0</p>
           </div>
         </div>
         <button
@@ -4069,50 +4088,152 @@ export default function ProspectingApp() {
                 }}
               />
             ) : viewMode === "nro" ? (
-              <div className="bg-gradient-to-br from-indigo-600/15 to-indigo-600/5 border border-indigo-500/30 rounded-3xl p-6 shadow-refined-lg">
-                <div className="text-[10px] font-black uppercase text-indigo-400 tracking-widest mb-4">
-                  New Retail Opportunities Search
-                </div>
-                <form onSubmit={handleNroSearch}>
-                  <div className="space-y-3">
-                    <div className="flex gap-2">
-                      <select
-                        value={nroSearchType}
-                        onChange={(e) => setNroSearchType(e.target.value)}
-                        className="bg-[#0F172A] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold text-slate-200 focus:border-indigo-500 focus:outline-none transition-colors uppercase cursor-pointer"
-                      >
-                        <option value="city">City</option>
-                        <option value="county">County</option>
-                        <option value="zip">Zip Code</option>
-                      </select>
-                      <input
-                        type="text"
-                        id="nro-search"
-                        name="nroSearch"
-                        placeholder={
-                          nroSearchType === 'city' ? 'CITY (e.g., AUSTIN)' :
-                          nroSearchType === 'county' ? 'COUNTY (e.g., TRAVIS)' :
-                          'ZIP CODE (e.g., 78701)'
-                        }
-                        value={nroSearchTerm}
-                        onChange={(e) => setNroSearchTerm(nroSearchType === 'zip' ? e.target.value : e.target.value.toUpperCase())}
-                        className="flex-1 bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={nroLoading || !nroSearchTerm.trim()}
-                      className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
-                    >
-                      {nroLoading ? 'Searching...' : 'Search New Licenses (Last 4 Months)'}
-                    </button>
-                    {nroError && (
-                      <div className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3">
-                        {nroError}
-                      </div>
+              <div className="space-y-4">
+                {/* Sub-tab switcher */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setNroSubView("search")}
+                    className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      nroSubView === "search"
+                        ? "bg-indigo-600 text-white shadow-refined"
+                        : "bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/50"
+                    }`}
+                  >
+                    Generic Search
+                  </button>
+                  <button
+                    onClick={() => setNroSubView("territory")}
+                    className={`flex-1 relative py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      nroSubView === "territory"
+                        ? "bg-indigo-600 text-white shadow-refined"
+                        : "bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/50"
+                    }`}
+                  >
+                    My Territory
+                    {territoryUnacknowledgedCount > 0 && nroSubView !== "territory" && (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-orange-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">
+                        {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
+                      </span>
                     )}
+                  </button>
+                </div>
+
+                {/* Generic Search */}
+                {nroSubView === "search" && (
+                  <div className="bg-gradient-to-br from-indigo-600/15 to-indigo-600/5 border border-indigo-500/30 rounded-3xl p-6 shadow-refined-lg">
+                    <div className="text-[10px] font-black uppercase text-indigo-400 tracking-widest mb-4">
+                      New Retail Opportunities Search
+                    </div>
+                    <form onSubmit={handleNroSearch}>
+                      <div className="space-y-3">
+                        <div className="flex gap-2">
+                          <select
+                            value={nroSearchType}
+                            onChange={(e) => setNroSearchType(e.target.value)}
+                            className="bg-[#0F172A] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold text-slate-200 focus:border-indigo-500 focus:outline-none transition-colors uppercase cursor-pointer"
+                          >
+                            <option value="city">City</option>
+                            <option value="county">County</option>
+                            <option value="zip">Zip Code</option>
+                          </select>
+                          <input
+                            type="text"
+                            id="nro-search"
+                            name="nroSearch"
+                            placeholder={
+                              nroSearchType === 'city' ? 'CITY (e.g., AUSTIN)' :
+                              nroSearchType === 'county' ? 'COUNTY (e.g., TRAVIS)' :
+                              'ZIP CODE (e.g., 78701)'
+                            }
+                            value={nroSearchTerm}
+                            onChange={(e) => setNroSearchTerm(nroSearchType === 'zip' ? e.target.value : e.target.value.toUpperCase())}
+                            className="flex-1 bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={nroLoading || !nroSearchTerm.trim()}
+                          className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200 shadow-refined hover:shadow-refined-lg"
+                        >
+                          {nroLoading ? 'Searching...' : 'Search New Licenses (Last 4 Months)'}
+                        </button>
+                        {nroError && (
+                          <div className="text-[11px] font-bold text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-2xl p-3">
+                            {nroError}
+                          </div>
+                        )}
+                      </div>
+                    </form>
                   </div>
-                </form>
+                )}
+
+                {/* My Territory */}
+                {nroSubView === "territory" && (
+                  <TerritoryPanel
+                    savedAccounts={savedAccounts}
+                    onUnacknowledgedChange={setTerritoryUnacknowledgedCount}
+                    onAccountClick={async (result) => {
+                      // Map territory result fields to the info shape the detail panel expects
+                      const info = {
+                        location_name: result.name,
+                        location_address: result.address,
+                        location_city: result.city,
+                        zip_code: result.zip,
+                        license_type: result.license_type,
+                        issue_date: result.issue_date,
+                        source: result.source,
+                      };
+                      setLoading(true);
+                      try {
+                        const searchName = (result.name || "").toUpperCase();
+                        const searchCity = (result.city || "").toUpperCase();
+                        const where = buildSocrataWhere(searchName, searchCity);
+                        const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=12`;
+                        const res = await fetch(`${BASE_URL}${query}`);
+                        let history = [];
+                        if (res.ok) {
+                          const hist = await res.json();
+                          const rows = Array.isArray(hist) ? hist : [];
+                          const exactMatch = rows.filter(
+                            (row) => (row.location_name || "").toUpperCase() === searchName
+                          );
+                          if (exactMatch.length > 0) {
+                            history = [...exactMatch].reverse().map((h) => ({
+                              month: monthLabelFromDate(h[DATE_FIELD]),
+                              liquor: Number(h.liquor_receipts || 0),
+                              beer: Number(h.beer_receipts || 0),
+                              wine: Number(h.wine_receipts || 0),
+                              total: Number(h[TOTAL_FIELD] || 0),
+                              rawDate: h[DATE_FIELD],
+                            }));
+                          }
+                        }
+                        setSelectedEstablishment({ info, history });
+                        // Don't pre-select NRO tier — user must click NRO button to set it
+                        if (history.length > 0) {
+                          const avg = history.reduce((s, h) => s + h.total, 0) / history.length;
+                          const annual = avg * 12;
+                          let tier = "tier1";
+                          if (annual >= 1000000) tier = "tier6";
+                          else if (annual >= 500000) tier = "tier5";
+                          else if (annual >= 250000) tier = "tier4";
+                          else if (annual >= 100000) tier = "tier3";
+                          else if (annual >= 50000) tier = "tier2";
+                          setSelectedGpvTier(tier);
+                        } else {
+                          setSelectedGpvTier(null);
+                        }
+                        await fetchAiForInfo(info, { updateState: true });
+                      } catch {
+                        setSelectedEstablishment({ info, history: [] });
+                        setSelectedGpvTier(null);
+                        try { await fetchAiForInfo(info, { updateState: true }); } catch {}
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                  />
+                )}
               </div>
             ) : (
               <SearchForm
@@ -5987,14 +6108,17 @@ export default function ProspectingApp() {
                       {viewMode === "nro" && (
                         <button
                           onClick={() => {
-                            // Always set to NRO tier when using NRO button
                             setSelectedGpvTier('nro');
-                            // Use setTimeout to ensure state is updated before saving
-                            setTimeout(() => toggleSaveAccount(), 50);
+                            toggleSaveAccount('nro');
                           }}
                           disabled={aiLoading && !isSaved(selectedEstablishment.info)}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed border border-emerald-500 rounded-lg text-white text-[9px] font-black uppercase tracking-widest text-center transition-all"
+                          className={`flex flex-col items-center justify-center w-16 h-16 rounded-[1.5rem] border transition-all text-[8px] font-black uppercase ${
+                            isSaved(selectedEstablishment.info)
+                              ? "bg-emerald-600 border-emerald-500 text-white"
+                              : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
+                          <span className="text-lg leading-none mb-1">✦</span>
                           NRO
                         </button>
                       )}
@@ -6289,7 +6413,14 @@ export default function ProspectingApp() {
               }}
               className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "nro" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
             >
-              <Sparkles size={18} className="mb-1" />
+              <div className="relative">
+                <Sparkles size={18} className="mb-1" />
+                {territoryUnacknowledgedCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">
+                    {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
+                  </span>
+                )}
+              </div>
               <span>NRO</span>
             </button>
 
