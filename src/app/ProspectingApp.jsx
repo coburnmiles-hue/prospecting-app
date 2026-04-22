@@ -700,7 +700,7 @@ export default function ProspectingApp() {
 
   const toggleSaveAccount = async (gpvTierOverride) => {
     if (!selectedEstablishment?.info) return;
-    const effectiveTier = gpvTierOverride ?? selectedGpvTier;
+    const effectiveTier = typeof gpvTierOverride === "string" ? gpvTierOverride : selectedGpvTier;
 
     // This version uses Neon as a simple “saved pins” store.
     // Your table is: accounts(id, name, address, lat, lng, notes, created_at)
@@ -3773,6 +3773,7 @@ export default function ProspectingApp() {
         title={title}
         subtitle={subtitle}
         metric={metric}
+        savedStatus={viewMode === "top" || viewMode === "search" ? (isSaved(data) ? "saved" : "unsaved") : undefined}
         showDelete={viewMode === "saved"}
         onDelete={viewMode === "saved" ? async () => {
           if (!data.id) return;

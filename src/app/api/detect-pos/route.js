@@ -8,20 +8,20 @@
 //   6. Gemini AI + Google Search grounding — last-resort web search
 
 const POS_SIGNATURES = [
-  { name: "Toast",        patterns: ["toasttab.com"] },
-  { name: "Square",       patterns: ["squareup.com", "square.site"] },
-  { name: "Clover",       patterns: ["clover.com/order", "clovercdn.com"] },
-  { name: "Lightspeed",   patterns: ["lightspeedpos.com", "lightspeedhq.com", "upserve.com"] },
-  { name: "Olo",          patterns: ["olo.com"] },
-  { name: "SpotOn",       patterns: ["spoton.com"] },
-  { name: "Aloha / NCR",  patterns: ["ncrvoyix.com", "alohaenterprise.com"] },
+  { name: "Toast",        patterns: ["toasttab.com", "cdn.toasttab.com", "s3.amazonaws.com/toasttab", "toasttab.com/giftcards"] },
+  { name: "Square",       patterns: ["squareup.com", "square.site", "squarecdn.com", "s3.squareup.com", "squareup.com/gift"] },
+  { name: "Clover",       patterns: ["clover.com/order", "clovercdn.com", "clover.com/gift-cards", "sandbox.dev.clover.com"] },
+  { name: "Lightspeed",   patterns: ["lightspeedpos.com", "lightspeedhq.com", "upserve.com", "lightspeedrestaurant.com"] },
+  { name: "Olo",          patterns: ["olo.com", "olocdn.com"] },
+  { name: "SpotOn",       patterns: ["spoton.com", "spotondine.com"] },
+  { name: "Aloha / NCR",  patterns: ["ncrvoyix.com", "alohaenterprise.com", "ncr.com/aloha"] },
   { name: "TouchBistro",  patterns: ["touchbistro.com"] },
-  { name: "BentoBox",     patterns: ["getbento.com", "bentobox.com"] },
+  { name: "BentoBox",     patterns: ["getbento.com", "bentobox.com", "cdn.getbento.com"] },
   { name: "Revel",        patterns: ["revelsystems.com"] },
   { name: "HungerRush",   patterns: ["hungerrush.com", "revention.com"] },
   { name: "Lavu",         patterns: ["poslavu.com"] },
   { name: "Owner.com",    patterns: ["owner.com"] },
-  { name: "PopMenu",      patterns: ["popmenu.com"] },
+  { name: "PopMenu",      patterns: ["popmenu.com", "cdn.popmenu.com"] },
   { name: "Flipdish",     patterns: ["flipdish.com", "order.flipdish.com"] },
   { name: "Deliverect",   patterns: ["deliverect.com", "order.deliverect.com"] },
   { name: "ChowNow",      patterns: ["chownow.com", "ordering.chownow.com"] },
@@ -29,6 +29,10 @@ const POS_SIGNATURES = [
   { name: "Slice",        patterns: ["slicelife.com", "slice.com"] },
   { name: "Allset",       patterns: ["allsetnow.com"] },
   { name: "Zuppler",      patterns: ["zuppler.com"] },
+  { name: "Incentivio",   patterns: ["incentivio.com"] },
+  { name: "Paytronix",    patterns: ["paytronix.com"] },
+  { name: "Tillster",     patterns: ["tillster.com"] },
+  { name: "Bopple",       patterns: ["bopple.com"] },
 ];
 
 // Simple in-memory cache with TTL (30 minutes)
@@ -75,6 +79,18 @@ function scanForPos(text) {
         return sig.name;
       }
     }
+  }
+  return null;
+}
+
+// Scan all anchor href values in HTML — catches "Order Now" buttons linking to POS ordering domains
+// and gift card links in footers even when POS scripts aren't embedded on the page.
+function scanHrefs(html) {
+  const hrefRegex = /href=["']([^"']+)["']/gi;
+  let match;
+  while ((match = hrefRegex.exec(html)) !== null) {
+    const detected = scanForPos(match[1]);
+    if (detected) return detected;
   }
   return null;
 }
@@ -231,8 +247,12 @@ async function fetchAndScan(url, sourceLabel) {
       }
       
       reader.cancel().catch(() => {});
+      // First try full text scan (scripts, inline data, etc.)
       const detected = scanForPos(html);
-      return detected ? { pos: detected, source: sourceLabel } : null;
+      if (detected) return { pos: detected, source: sourceLabel };
+      // Then specifically scan anchor hrefs — catches Order/Gift Card buttons
+      const hrefDetected = scanHrefs(html);
+      return hrefDetected ? { pos: hrefDetected, source: `${sourceLabel} (order link)` } : null;
     } catch {
       clearTimeout(timer);
       return null;

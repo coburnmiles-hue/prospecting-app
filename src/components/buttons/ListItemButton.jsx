@@ -1,13 +1,20 @@
 import { ChevronRight, X } from "lucide-react";
 
-export default function ListItemButton({ onClick, isActive, title, subtitle, itemKey, onDelete, showDelete, metric }) {
+export default function ListItemButton({ onClick, isActive, title, subtitle, itemKey, onDelete, showDelete, metric, savedStatus }) {
+  // savedStatus: 'saved' | 'unsaved' | undefined (no coloring for saved-view items)
+  const colorClass = isActive
+    ? "bg-indigo-700 border-indigo-500 text-white"
+    : savedStatus === "saved"
+    ? "bg-emerald-900/20 border-emerald-600/50 hover:border-emerald-500"
+    : savedStatus === "unsaved"
+    ? "bg-amber-900/10 border-amber-600/30 hover:border-amber-500/60"
+    : "bg-[#1E293B] border-slate-700 hover:border-slate-500";
+
   return (
     <button
       key={itemKey}
       onClick={onClick}
-      className={`w-full text-left p-5 rounded-3xl border transition-all flex items-center justify-between group ${
-        isActive ? "bg-indigo-700 border-indigo-500 text-white" : "bg-[#1E293B] border-slate-700 hover:border-slate-500"
-      }`}
+      className={`w-full text-left p-5 rounded-3xl border transition-all flex items-center justify-between group ${colorClass}`}
     >
       <div className="truncate flex-1">
         <div className="flex items-center gap-2">
