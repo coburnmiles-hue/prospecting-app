@@ -212,7 +212,9 @@ export default function ProspectingApp() {
   const [selectedGpvTier, setSelectedGpvTier] = useState(null);
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
   const [selectedActiveAccount, setSelectedActiveAccount] = useState(false);
+  const [selectedClosedLost, setSelectedClosedLost] = useState(false);
   const [selectedReferral, setSelectedReferral] = useState(false);
+  const [selectedStrategic, setSelectedStrategic] = useState(false);
   const [selectedHotLead, setSelectedHotLead] = useState(false);
   const [wonGpv, setWonGpv] = useState('');
   const [wonArr, setWonArr] = useState('');
@@ -247,6 +249,7 @@ export default function ProspectingApp() {
   const [legendOpen, setLegendOpen] = useState(true);
   const [gpvTiersOpen, setGpvTiersOpen] = useState(false);
   const [hoursFilterOpen, setHoursFilterOpen] = useState(false);
+  const [opportunitiesFilterOpen, setOpportunitiesFilterOpen] = useState(false);
   const [mapSearch, setMapSearch] = useState("");
   const [mapSearchSuggestions, setMapSearchSuggestions] = useState([]);
   const [showMapSuggestions, setShowMapSuggestions] = useState(false);
@@ -264,6 +267,8 @@ export default function ProspectingApp() {
   const [showNroOnly, setShowNroOnly] = useState(false);
   const [showReferralOnly, setShowReferralOnly] = useState(false);
   const [showHotLeadOnly, setShowHotLeadOnly] = useState(false);
+  const [showStrategicOnly, setShowStrategicOnly] = useState(false);
+  const [showClosedLostOnly, setShowClosedLostOnly] = useState(false);
   const [showOpenOnly, setShowOpenOnly] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [customDayFilter, setCustomDayFilter] = useState(null); // 0-6 (Sunday-Saturday)
@@ -798,7 +803,8 @@ export default function ProspectingApp() {
           notes: Array.isArray(notesToPersist) ? notesToPersist : [], 
           history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], 
           gpvTier: effectiveTier, 
-          activeOpp: selectedActiveOpp, 
+          activeOpp: selectedActiveOpp,
+          closedLost: selectedClosedLost,
           venueType: venueType, 
           venueTypeLocked: venueTypeLocked,
           aiResponse: aiResponse || "",
@@ -901,9 +907,10 @@ export default function ProspectingApp() {
       setSelectedGpvTier(null);
       setSelectedActiveOpp(false);
       setSelectedActiveAccount(false);
+      setSelectedClosedLost(false);
       setSelectedReferral(false);
       setSelectedHotLead(false);
-      setSelectedHotLead(false);
+      setSelectedStrategic(false);
       setWonGpv('');
       setWonArr('');
       setWonDateSigned('');
@@ -922,8 +929,10 @@ export default function ProspectingApp() {
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
       setSelectedActiveAccount(parsed?.activeAccount || false);
+      setSelectedClosedLost(parsed?.closedLost || false);
       setSelectedReferral(parsed?.referral || false);
       setSelectedHotLead(parsed?.hotLead || false);
+      setSelectedStrategic(parsed?.strategic || false);
       setWonGpv(parsed?.wonGpv || '');
       setWonArr(parsed?.wonArr || '');
       setWonDateSigned(parsed?.wonDateSigned || '');
@@ -1039,6 +1048,7 @@ export default function ProspectingApp() {
             history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [],
             gpvTier: selectedGpvTier,
             activeOpp: selectedActiveOpp,
+            closedLost: selectedClosedLost,
             venueType: venueType,
             venueTypeLocked: venueTypeLocked,
             aiResponse: aiResponse || ""
@@ -1111,11 +1121,17 @@ export default function ProspectingApp() {
             if (parsed?.activeOpp !== selectedActiveOpp) {
               setSelectedActiveOpp(parsed?.activeOpp || false);
             }
+            if (parsed?.closedLost !== selectedClosedLost) {
+              setSelectedClosedLost(parsed?.closedLost || false);
+            }
             if (parsed?.referral !== selectedReferral) {
               setSelectedReferral(parsed?.referral || false);
             }
             if (parsed?.hotLead !== selectedHotLead) {
               setSelectedHotLead(parsed?.hotLead || false);
+            }
+            if (parsed?.strategic !== selectedStrategic) {
+              setSelectedStrategic(parsed?.strategic || false);
             }
             if (parsed?.venueType && parsed.venueType !== venueType) {
               setVenueType(parsed.venueType);
@@ -1215,8 +1231,10 @@ export default function ProspectingApp() {
           const parsed = parseSavedNotes(refreshedRow.notes);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
+          setSelectedClosedLost(parsed?.closedLost || false);
           setSelectedReferral(parsed?.referral || false);
           setSelectedHotLead(parsed?.hotLead || false);
+          setSelectedStrategic(parsed?.strategic || false);
           if (parsed?.venueType) {
             setVenueType(parsed.venueType);
           }
@@ -2303,14 +2321,20 @@ export default function ProspectingApp() {
         parsed.businessHours.openNow = isOpen;
       }
       
-      // If 'show only active' is enabled, skip any non-active pins
-      if (showActiveOnly && !parsed?.activeAccount) return;
+      // If 'show active opp only' is enabled, skip any non-active-opp pins
+      if (showActiveOnly && !parsed?.activeOpp) return;
 
       // If 'show referral only' is enabled, skip any non-referral pins
       if (showReferralOnly && !parsed?.referral) return;
 
       // If 'show hot lead only' is enabled, skip any non-hot-lead pins
       if (showHotLeadOnly && !parsed?.hotLead) return;
+
+      // If 'show strategic only' is enabled, skip any non-strategic pins
+      if (showStrategicOnly && !parsed?.strategic) return;
+
+      // If 'show closed lost only' is enabled, skip any non-closed-lost pins
+      if (showClosedLostOnly && !parsed?.closedLost) return;
 
       // If 'show NRO only' is enabled, only show NRO tier pins
       if (showNroOnly) {
@@ -2435,7 +2459,12 @@ export default function ProspectingApp() {
       
       const tierColor = GPV_TIERS.find((t) => t.id === tier)?.color || "#4f46e5";
       const active = parsed?.activeOpp || false;
-      const halo = active ? '0 0 0 10px rgba(16,185,129,0.32),' : '';
+      const closedLost = parsed?.closedLost || false;
+      const halo = closedLost
+        ? '0 0 0 10px rgba(239,68,68,0.35),'
+        : active
+        ? '0 0 0 10px rgba(16,185,129,0.32),'
+        : '';
 
       let markerIcon;
       if (parsed?.activeAccount) {
@@ -3173,7 +3202,7 @@ export default function ProspectingApp() {
   useEffect(() => {
     if (viewMode === "map") updateMarkers(false); // Don't fit bounds on filter changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showReferralOnly, showHotLeadOnly, showOpenOnly, customFilterActive]);
+  }, [savedAccounts, savedSubView, selectedGpvTier, visibleTiers, visibleActiveAccounts, showSavedPins, showActiveOnly, showUnvisitedOnly, showNroOnly, showReferralOnly, showHotLeadOnly, showStrategicOnly, showClosedLostOnly, showOpenOnly, customFilterActive]);
 
   // Listen for popup-dispatched custom events from leaflet popup buttons
   useEffect(() => {
@@ -3192,9 +3221,9 @@ export default function ProspectingApp() {
           // Find the account in savedAccounts
           const account = savedAccounts.find(a => a.id === id);
           if (account) {
-            // Parse notes to get history and other data
+            // Parse notes to get history and all flags
             try {
-              const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
+              const parsed = parseSavedNotes(account.notes);
               const keyParts = parsed?.key ? parsed.key.split('-') : [];
               
               // Load saved AI response if available
@@ -3206,7 +3235,21 @@ export default function ProspectingApp() {
                 skipAiLookupRef.current = false;
                 setAiResponse("");
               }
-              
+
+              // Restore all flags
+              setSelectedGpvTier(parsed?.gpvTier || null);
+              setSelectedActiveOpp(parsed?.activeOpp || false);
+              setSelectedClosedLost(parsed?.closedLost || false);
+              setSelectedActiveAccount(parsed?.activeAccount || false);
+              setSelectedReferral(parsed?.referral || false);
+              setSelectedHotLead(parsed?.hotLead || false);
+              setSelectedStrategic(parsed?.strategic || false);
+              setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+              setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
+              setNotesOwner({ id: account.id, key: parsed.key || null });
+              if (parsed?.venueType) setVenueType(parsed.venueType);
+              setVenueTypeLocked(parsed?.venueTypeLocked || false);
+
               setSelectedEstablishment({
                 info: {
                   id: account.id,
@@ -3216,7 +3259,7 @@ export default function ProspectingApp() {
                   location_number: keyParts[1] || undefined,
                   lat: account.lat,
                   lng: account.lng,
-                  notes: account.notes, // Include notes for hours/website caching
+                  notes: account.notes,
                 },
                 history: Array.isArray(parsed?.history) ? parsed.history : [],
               });
@@ -3224,8 +3267,7 @@ export default function ProspectingApp() {
               console.error('Failed to parse account notes:', parseErr);
             }
           }
-          setViewMode('saved');
-          setSavedSubView('info');
+          // Stay on the map — details render below
         }
       } catch (err) {
         console.error('viewDetails handler failed', err);
@@ -3569,11 +3611,10 @@ export default function ProspectingApp() {
       // Always restore GPV, Active Opp, venue type and notes owner for saved items (if present)
       setSelectedGpvTier(parsed?.gpvTier || null);
       setSelectedActiveOpp(parsed?.activeOpp || false);
+      setSelectedClosedLost(parsed?.closedLost || false);
       setSelectedReferral(parsed?.referral || false);
       setSelectedHotLead(parsed?.hotLead || false);
-      if (parsed?.venueType) {
-        setVenueType(parsed.venueType);
-      }
+      setSelectedStrategic(parsed?.strategic || false);
       setVenueTypeLocked(parsed?.venueTypeLocked || false);
       setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
       setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
@@ -3672,8 +3713,10 @@ export default function ProspectingApp() {
           setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
+          setSelectedClosedLost(parsed?.closedLost || false);
           setSelectedReferral(parsed?.referral || false);
           setSelectedHotLead(parsed?.hotLead || false);
+          setSelectedStrategic(parsed?.strategic || false);
           if (parsed?.venueType) {
             setVenueType(parsed.venueType);
           }
@@ -3818,7 +3861,10 @@ export default function ProspectingApp() {
 
       // Local-only toggle for unsaved account
       if (!saved || !saved.id) {
-        setSelectedActiveOpp((s) => !s);
+        setSelectedActiveOpp((s) => {
+          if (!s) setSelectedClosedLost(false); // turning ON: clear closed lost
+          return !s;
+        });
         setNotesOwner((o) => ({ ...o, key }));
         return;
       }
@@ -3829,6 +3875,11 @@ export default function ProspectingApp() {
         const wasActive = !!notesObj.activeOpp;
         notesObj.activeOpp = !wasActive;
         
+        // Mutual exclusivity: turning ON activeOpp clears closedLost
+        if (!wasActive) {
+          notesObj.closedLost = false;
+        }
+
         // Track timestamp when turning ON activeOpp
         if (!wasActive && notesObj.activeOpp) {
           notesObj.activeOppDate = new Date().toISOString();
@@ -3844,6 +3895,7 @@ export default function ProspectingApp() {
         await refreshSavedAccounts();
 
         setSelectedActiveOpp(notesObj.activeOpp || false);
+        if (!wasActive) setSelectedClosedLost(false); // sync UI state
         setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Active Opp.");
@@ -3911,6 +3963,98 @@ export default function ProspectingApp() {
         }
       } catch (err) {
         setError(err?.message || "Could not toggle Active Account.");
+      }
+    };
+
+    // Toggle Strategic flag for selected account
+    const toggleStrategic = async () => {
+      if (!selectedEstablishment?.info) return;
+      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+        try {
+          const parsed = parseSavedNotes(a.notes);
+          if (parsed?.key && parsed.key === key) return true;
+        } catch {}
+        return false;
+      });
+
+      if (!saved || !saved.id) {
+        setSelectedStrategic((s) => !s);
+        setNotesOwner((o) => ({ ...o, key }));
+        return;
+      }
+
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], strategic: parsed?.strategic ?? false };
+        notesObj.strategic = !notesObj.strategic;
+
+        const res = await fetch(`/api/accounts?id=${saved.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error("Could not update strategic flag");
+
+        await refreshSavedAccounts();
+
+        setSelectedStrategic(notesObj.strategic || false);
+        setNotesOwner({ id: saved.id, key: parsed.key || null });
+      } catch (err) {
+        setError(err?.message || "Could not toggle Strategic.");
+      }
+    };
+
+    // Toggle Closed Lost flag for selected account
+    const toggleClosedLost = async () => {
+      if (!selectedEstablishment?.info) return;
+      const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
+
+      const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+        if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
+        try {
+          const parsed = parseSavedNotes(a.notes);
+          if (parsed?.key && parsed.key === key) return true;
+        } catch {}
+        return false;
+      });
+
+      if (!saved || !saved.id) {
+        setSelectedClosedLost((s) => {
+          if (!s) setSelectedActiveOpp(false); // turning ON: clear active opp
+          return !s;
+        });
+        setNotesOwner((o) => ({ ...o, key }));
+        return;
+      }
+
+      try {
+        const parsed = parseSavedNotes(saved.notes);
+        let notesObj = (parsed && parsed.raw && typeof parsed.raw === "object") ? parsed.raw : { key: parsed.key ? `KEY:${parsed.key}` : `KEY:${key}`, notes: parsed.notes || [], history: parsed.history || [], closedLost: parsed?.closedLost ?? false };
+        const wasClosedLost = !!notesObj.closedLost;
+        notesObj.closedLost = !wasClosedLost;
+
+        // Mutual exclusivity: turning ON closedLost clears activeOpp
+        if (!wasClosedLost) {
+          notesObj.activeOpp = false;
+        }
+
+        const res = await fetch(`/api/accounts?id=${saved.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: JSON.stringify(notesObj) }),
+        });
+        if (!res.ok) throw new Error("Could not update closed lost flag");
+
+        await refreshSavedAccounts();
+
+        setSelectedClosedLost(notesObj.closedLost || false);
+        if (!wasClosedLost) setSelectedActiveOpp(false); // sync UI state
+        setNotesOwner({ id: saved.id, key: parsed.key || null });
+      } catch (err) {
+        setError(err?.message || "Could not toggle Closed Lost.");
       }
     };
 
@@ -4885,7 +5029,7 @@ export default function ProspectingApp() {
               </div>
             </>
           )}
-          {viewMode === "map" ? (
+          {viewMode === "map" && (
             <>
               <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]" style={{ isolation: "isolate" }}>
               
@@ -5089,22 +5233,6 @@ export default function ProspectingApp() {
                     </button>
 
                     <button
-                      onClick={() => {
-                        setShowActiveOnly(s => {
-                          const next = !s;
-                          if (next) setVisibleActiveAccounts(true);
-                          return next;
-                        });
-                      }}
-                      title="Show active accounts only"
-                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showActiveOnly ? 'bg-amber-500 text-[#081113] border-amber-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
-                      style={{ backdropFilter: 'blur(4px)' }}
-                    >
-                      <span className="font-black">$</span>
-                      <span>Active Only</span>
-                    </button>
-
-                    <button
                       onClick={() => setShowReferralOnly(v => !v)}
                       title="Show referral accounts only"
                       className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showReferralOnly ? 'bg-purple-500 text-white border-purple-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
@@ -5121,7 +5249,63 @@ export default function ProspectingApp() {
                     >
                       <span>🔥 Hot Lead</span>
                     </button>
+
+                    <button
+                      onClick={() => setShowStrategicOnly(v => !v)}
+                      title="Show strategic accounts only"
+                      className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showStrategicOnly ? 'bg-sky-500 text-white border-sky-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                      style={{ backdropFilter: 'blur(4px)' }}
+                    >
+                      <span>⚡ Strategic</span>
+                    </button>
                   </div>
+                    )}
+                  </div>
+
+                  {/* Opportunities Collapsible Section */}
+                  <div className="border-t border-slate-700 pt-2">
+                    <button
+                      onClick={() => setOpportunitiesFilterOpen(o => !o)}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
+                    >
+                      <span className="text-[10px] font-black uppercase text-slate-300">Opportunities</span>
+                      <span className="text-[10px] text-slate-400">{opportunitiesFilterOpen ? '−' : '+'}</span>
+                    </button>
+                    {opportunitiesFilterOpen && (
+                      <div className="flex flex-col gap-2 mt-2">
+                        <button
+                          onClick={() => {
+                            setShowActiveOnly(s => {
+                              const next = !s;
+                              if (next) setVisibleActiveAccounts(true);
+                              return next;
+                            });
+                          }}
+                          title="Show active opp accounts only"
+                          className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showActiveOnly ? 'bg-amber-500 text-[#081113] border-amber-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                          style={{ backdropFilter: 'blur(4px)' }}
+                        >
+                          <span>Active Opp</span>
+                        </button>
+
+                        <button
+                          onClick={() => setVisibleActiveAccounts(v => !v)}
+                          title="Show active account accounts only"
+                          className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${visibleActiveAccounts ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                          style={{ backdropFilter: 'blur(4px)' }}
+                        >
+                          <span>Active Account</span>
+                        </button>
+
+                        <button
+                          onClick={() => setShowClosedLostOnly(v => !v)}
+                          title="Show closed lost accounts only"
+                          className={`w-full px-3 py-1.5 rounded-md border text-slate-200 flex items-center justify-center gap-2 text-[12px] font-black ${showClosedLostOnly ? 'bg-rose-600 text-white border-rose-600' : 'bg-slate-800/70 hover:bg-slate-700 border-slate-700'}`}
+                          style={{ backdropFilter: 'blur(4px)' }}
+                        >
+                          <span>Closed Lost</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -5682,7 +5866,8 @@ export default function ProspectingApp() {
               )}
             </div>
             </>
-          ) : viewMode === "metrics" ? (
+          )}
+          {viewMode === "metrics" && (
             <div className="space-y-6">
               {/* Metrics Section */}
               <PersonalMetrics 
@@ -5937,8 +6122,9 @@ export default function ProspectingApp() {
                 )}
               </div>
             </div>
-          ) : selectedEstablishment ? (
-            <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+          )}
+          {selectedEstablishment && (
+            <div className={viewMode === "map" ? "mt-6 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : "space-y-6 animate-in slide-in-from-bottom-4 duration-500"}>
               {/* Manual account banner */}
               {(() => {
                 try {
@@ -6295,10 +6481,14 @@ export default function ProspectingApp() {
                 onToggleActiveOpp={toggleActiveOpp}
                 selectedActiveAccount={selectedActiveAccount}
                 onToggleActiveAccount={toggleActiveAccount}
+                selectedClosedLost={selectedClosedLost}
+                onToggleClosedLost={toggleClosedLost}
                 selectedReferral={selectedReferral}
                 onToggleReferral={toggleReferral}
                 selectedHotLead={selectedHotLead}
                 onToggleHotLead={toggleHotLead}
+                selectedStrategic={selectedStrategic}
+                onToggleStrategic={toggleStrategic}
                 wonGpv={wonGpv}
                 setWonGpv={setWonGpv}
                 wonArr={wonArr}
@@ -6326,7 +6516,8 @@ export default function ProspectingApp() {
                 />
               )}
             </div>
-          ) : (
+          )}
+          {viewMode !== "map" && !selectedEstablishment && (
             <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
               {viewMode === "top" && topViewMode === "map" ? (
                 <>
