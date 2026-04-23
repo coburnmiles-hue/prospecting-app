@@ -26,9 +26,12 @@ export function monthLabelFromDate(d) {
 }
 
 export function getFullAddress(info) {
-  const addr = info.location_address || info.address || "";
-  const city = info.location_city || info.city || "";
-  return city ? `${addr}, ${city}, TX` : addr || "Unknown";
+  const addr = (info.location_address || info.address || "").trim();
+  const city = (info.location_city || info.city || "").trim();
+  if (!city) return addr || "Unknown";
+  // Avoid appending city if it's already in the address string
+  if (addr.toUpperCase().includes(city.toUpperCase())) return addr;
+  return `${addr}, ${city}, TX`;
 }
 
 export function pseudoLatLng(seed) {

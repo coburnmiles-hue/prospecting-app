@@ -846,7 +846,8 @@ export default function ProspectingApp() {
           const aAddr = (a.address || '').toLowerCase();
           const infoName = (info.location_name || '').toLowerCase();
           const infoAddr = (info.location_address || '').toLowerCase();
-          return aName === infoName && aAddr === infoAddr;
+          // Use startsWith to handle full saved address ("123 Main, Austin, TX") vs street-only info address
+          return aName === infoName && (aAddr === infoAddr || aAddr.startsWith(infoAddr));
         });
         
         if (newlySaved) {
@@ -876,7 +877,18 @@ export default function ProspectingApp() {
         setManualResults([]);
         setManualSelected(null);
       } else {
-        // For regular accounts, keep existing behavior
+        // For non-manual (NRO/regular) accounts, find newly saved record and update the id
+        // so that subsequent note saves can look it up without creating a duplicate
+        const savedRecord = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => {
+          try {
+            const p = parseSavedNotes(a.notes);
+            return p?.key === key;
+          } catch { return false; }
+        });
+        if (savedRecord?.id) {
+          setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, id: savedRecord.id } } : s);
+          setNotesOwner(o => ({ ...o, id: savedRecord.id }));
+        }
         setManualAddOpen(false);
         setManualQuery('');
         setManualResults([]);
@@ -893,7 +905,7 @@ export default function ProspectingApp() {
     if (!sel?.info) return;
 
     const key = `${sel.info.taxpayer_number || ""}-${sel.info.location_number || ""}`;
-    const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+    let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
       try {
         const parsed = parseSavedNotes(a.notes);
         if (parsed?.key && parsed.key === key) return true;
@@ -901,6 +913,19 @@ export default function ProspectingApp() {
       if (a.id != null && sel.info.id != null && a.id === sel.info.id) return true;
       return false;
     });
+
+    // Fallback: name+address match for territory/manual accounts that have no taxpayer_number
+    if (!saved) {
+      const selName = (sel.info.location_name || sel.info.name || '').toLowerCase().trim();
+      const selAddr = (sel.info.location_address || sel.info.address || '').toLowerCase().trim();
+      if (selName && selAddr) {
+        saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => {
+          const aName = (a.name || '').toLowerCase().trim();
+          const aAddr = (a.address || '').toLowerCase().trim();
+          return aName === selName && (aAddr === selAddr || aAddr.startsWith(selAddr));
+        });
+      }
+    }
 
     if (!saved || !saved.id) {
       // ensure UI state is cleared when no saved notes exist for this selection
@@ -997,6 +1022,7 @@ export default function ProspectingApp() {
 
     // Prefer direct ID match when possible, otherwise match by exact parsed key
     let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+      if (notesOwner?.id && a.id === notesOwner.id) return true; // most reliable — set by fetchNotesForSelected
       if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
       try {
         const parsed = parseSavedNotes(a.notes);
@@ -1004,6 +1030,19 @@ export default function ProspectingApp() {
       } catch {}
       return false;
     });
+
+    // Fallback: name+address match for territory/manual accounts without a taxpayer_number
+    if (!saved) {
+      const selName = (selectedEstablishment.info.location_name || '').toLowerCase().trim();
+      const selAddr = (selectedEstablishment.info.location_address || '').toLowerCase().trim();
+      if (selName && selAddr) {
+        saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => {
+          const aName = (a.name || '').toLowerCase().trim();
+          const aAddr = (a.address || '').toLowerCase().trim();
+          return aName === selName && (aAddr === selAddr || aAddr.startsWith(selAddr));
+        });
+      }
+    }
 
     // If not saved yet, auto-save the account first so notes can persist
     if (!saved || !saved.id) {
@@ -1157,6 +1196,7 @@ export default function ProspectingApp() {
     const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
 
     let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+      if (notesOwner?.id && a.id === notesOwner.id) return true; // most reliable — set by fetchNotesForSelected
       if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
       try {
         const parsed = parseSavedNotes(a.notes);
@@ -1204,6 +1244,7 @@ export default function ProspectingApp() {
     const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
 
     const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
+      if (notesOwner?.id && a.id === notesOwner.id) return true; // most reliable — set by fetchNotesForSelected
       if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
       try {
         const parsed = parseSavedNotes(a.notes);
