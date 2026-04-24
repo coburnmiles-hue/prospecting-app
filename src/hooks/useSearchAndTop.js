@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react";
 import { BASE_URL, DATE_FIELD, TOTAL_FIELD } from "../utils/constants";
-import { safeUpper, buildSocrataWhere } from "../utils/formatters";
+import { safeUpper, buildSocrataWhere, normalizeAddressSearch } from "../utils/formatters";
 
 export function useSearch() {
   const [searchTerm, setSearchTerm] = useState("");
   const [cityFilter, setCityFilter] = useState("");
+  const [searchMode, setSearchMode] = useState("name"); // "name" | "address"
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -21,7 +22,23 @@ export function useSearch() {
     try {
       const c = safeUpper(cityFilter);
 
-      const where = buildSocrataWhere(s, c);
+      let where;
+      if (searchMode === "address") {
+        // Build multiple OR clauses to handle apostrophes, hyphens, periods,
+        // and full street type words ("Street" -> "St", "Avenue" -> "Ave", etc.)
+        const sNorm = normalizeAddressSearch(s); // e.g. "MAIN STREET" -> "MAIN ST"
+        const stripped = s.replace(/['\u2019\-.]/g, ''); // raw stripped for replace() in Socrata
+        // Strip apostrophes, hyphens, and periods from the DB field for comparison
+        const dbStripped = `replace(replace(replace(upper(location_address), '''', ''), '-', ''), '.', '')`;
+        const clauses = [`upper(location_address) like '%${s}%'`];
+        if (stripped !== s) clauses.push(`${dbStripped} like '%${stripped}%'`);
+        if (sNorm !== s && sNorm !== stripped) clauses.push(`upper(location_address) like '%${sNorm}%'`);
+        const addrPart = `(${clauses.join(' OR ')})`;
+        where = c ? `${addrPart} AND upper(location_city) = '${c}'` : addrPart;
+      } else {
+        where = buildSocrataWhere(s, c);
+      }
+
       const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
         `${DATE_FIELD} DESC`
       )}&$limit=100`;
@@ -42,6 +59,19 @@ export function useSearch() {
         }
       }
 
+      // Sort: direct name matches first, then stripped/fuzzy matches
+      const norm = (str) => (str || '').toUpperCase().replace(/['’\-\s]/g, '');
+      const sNorm = norm(s);
+      unique.sort((a, b) => {
+        const aDirect = (a.location_name || '').toUpperCase().includes(s) ? 0 : 1;
+        const bDirect = (b.location_name || '').toUpperCase().includes(s) ? 0 : 1;
+        if (aDirect !== bDirect) return aDirect - bDirect;
+        // Secondary: normalized name contains normalized search
+        const aNorm = norm(a.location_name || '').includes(sNorm) ? 0 : 1;
+        const bNorm = norm(b.location_name || '').includes(sNorm) ? 0 : 1;
+        return aNorm - bNorm;
+      });
+
       setResults(unique);
     } catch (err) {
       setError(err?.message || "Search failed.");
@@ -49,13 +79,15 @@ export function useSearch() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, cityFilter]);
+  }, [searchTerm, cityFilter, searchMode]);
 
   return {
     searchTerm,
     setSearchTerm,
     cityFilter,
     setCityFilter,
+    searchMode,
+    setSearchMode,
     results,
     setResults,
     loading,

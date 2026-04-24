@@ -140,6 +140,8 @@ export default function ProspectingApp() {
     setSearchTerm,
     cityFilter,
     setCityFilter,
+    searchMode,
+    setSearchMode,
     results,
     loading: searchLoading,
     error: searchError,
@@ -180,6 +182,7 @@ export default function ProspectingApp() {
   };
 
   const [savedSearchTerm, setSavedSearchTerm] = useState("");
+  const [savedFlagFilters, setSavedFlagFilters] = useState(new Set()); // set of flag keys
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
   const [topViewMode, setTopViewMode] = useState("list"); // list | map
   const [topMapPinsLoading, setTopMapPinsLoading] = useState(false);
@@ -3626,13 +3629,35 @@ export default function ProspectingApp() {
   }, [venueType, venueTypeLocked, selectedGpvTier, selectedActiveOpp]);
 
   const filteredSavedAccounts = useMemo(() => {
-    if (!savedSearchTerm.trim()) return savedAccounts;
-    const s = savedSearchTerm.toUpperCase();
-    return savedAccounts.filter((a) =>
-      (a.name || "").toUpperCase().includes(s) ||
-      (a.address || "").toUpperCase().includes(s)
-    );
-  }, [savedAccounts, savedSearchTerm]);
+    let list = savedAccounts;
+    if (savedSearchTerm.trim()) {
+      const s = savedSearchTerm.toUpperCase();
+      list = list.filter((a) =>
+        (a.name || "").toUpperCase().includes(s) ||
+        (a.address || "").toUpperCase().includes(s)
+      );
+    }
+    if (savedFlagFilters.size > 0) {
+      list = list.filter((a) => {
+        try {
+          const p = parseSavedNotes(a.notes);
+          return [...savedFlagFilters].every((flag) => !!p?.[flag]);
+        } catch { return false; }
+      });
+    }
+    return list;
+  }, [savedAccounts, savedSearchTerm, savedFlagFilters]);
+
+  // Clear selected account if it no longer appears in the filtered list
+  useEffect(() => {
+    if (viewMode !== "saved" || !selectedEstablishment?.info?.id) return;
+    const stillVisible = filteredSavedAccounts.some(a => a.id === selectedEstablishment.info.id);
+    if (!stillVisible) {
+      setSelectedEstablishment(null);
+      setNotesList([]);
+      setFollowupsList([]);
+    }
+  }, [filteredSavedAccounts, viewMode]);
 
   const listToRender = useMemo(() => {
     if (viewMode === "saved") return filteredSavedAccounts;
@@ -4241,7 +4266,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v6.0</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v6.1</p>
           </div>
         </div>
         <button
@@ -4262,17 +4287,72 @@ export default function ProspectingApp() {
         {viewMode !== "metrics" && viewMode !== "map" && (
           <aside className="lg:col-span-4 space-y-6">
             {viewMode === "saved" ? (
+              <div className="space-y-3">
                 <SavedAccountsHeader
-                searchTerm={savedSearchTerm}
-                onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
-                isAddOpen={manualAddOpen}
-                onAdd={() => {
-                  setManualAddOpen((s) => !s);
-                  setManualSelected(null);
-                  setManualQuery("");
-                  setManualGpvTier(null);
-                }}
-              />
+                  searchTerm={savedSearchTerm}
+                  onSearchChange={(e) => setSavedSearchTerm(e.target.value)}
+                  isAddOpen={manualAddOpen}
+                  onAdd={() => {
+                    setManualAddOpen((s) => !s);
+                    setManualSelected(null);
+                    setManualQuery("");
+                    setManualGpvTier(null);
+                  }}
+                />
+                {/* Flag filters */}
+                {(() => {
+                  const flags = [
+                    { key: "activeOpp",     label: "Active Opp",     color: "emerald" },
+                    { key: "activeAccount", label: "Active Account", color: "indigo"  },
+                    { key: "hotLead",       label: "Hot Lead",       color: "orange"  },
+                    { key: "referral",      label: "Referral",       color: "sky"     },
+                    { key: "strategic",     label: "Strategic",      color: "violet"  },
+                    { key: "closedLost",    label: "Closed Lost",    color: "rose"    },
+                  ];
+                  const colorMap = {
+                    emerald: { on: "bg-emerald-600 text-white border-emerald-500",  off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
+                    indigo:  { on: "bg-indigo-600 text-white border-indigo-500",    off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
+                    orange:  { on: "bg-orange-600 text-white border-orange-500",    off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
+                    sky:     { on: "bg-sky-600 text-white border-sky-500",          off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
+                    violet:  { on: "bg-violet-600 text-white border-violet-500",    off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
+                    rose:    { on: "bg-rose-600 text-white border-rose-500",        off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
+                  };
+                  const toggle = (key) => setSavedFlagFilters(prev => {
+                    const next = new Set(prev);
+                    next.has(key) ? next.delete(key) : next.add(key);
+                    return next;
+                  });
+                  return (
+                    <div className="bg-[#1E293B] rounded-2xl border border-slate-700 p-3">
+                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Filter by flag</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {flags.map(({ key, label, color }) => {
+                          const active = savedFlagFilters.has(key);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => toggle(key)}
+                              className={`px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-wide transition-all ${colorMap[color][active ? "on" : "off"]}`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                        {savedFlagFilters.size > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSavedFlagFilters(new Set())}
+                            className="px-2.5 py-1 rounded-lg border border-slate-600 text-slate-500 text-[10px] font-black uppercase tracking-wide hover:text-slate-300 transition-all"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             ) : viewMode === "nro" ? (
               <div className="space-y-4">
                 {/* Sub-tab switcher */}
@@ -4435,6 +4515,8 @@ export default function ProspectingApp() {
                 loading={loading}
                 error={error}
                 viewMode={viewMode}
+                searchMode={searchMode}
+                onSearchModeChange={setSearchMode}
               />
             )}
 

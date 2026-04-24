@@ -97,11 +97,40 @@ export function parseAiSections(text) {
   };
 }
 
+// Normalize an address search term to match how TABC typically stores addresses
+// (abbreviations, no periods). Returns the normalized string.
+export function normalizeAddressSearch(input) {
+  let s = (input || '').toUpperCase()
+    .replace(/\./g, '')          // strip periods: "N. CONGRESS" -> "N CONGRESS"
+    .replace(/['\u2019]/g, '')   // strip apostrophes
+    .replace(/\s+/g, ' ')
+    .trim();
+  const abbrevs = [
+    [/\bSTREET\b/g, 'ST'], [/\bAVENUE\b/g, 'AVE'], [/\bBOULEVARD\b/g, 'BLVD'],
+    [/\bDRIVE\b/g, 'DR'],   [/\bROAD\b/g, 'RD'],   [/\bLANE\b/g, 'LN'],
+    [/\bCOURT\b/g, 'CT'],   [/\bPLACE\b/g, 'PL'],  [/\bCIRCLE\b/g, 'CIR'],
+    [/\bHIGHWAY\b/g, 'HWY'], [/\bFREEWAY\b/g, 'FWY'], [/\bEXPRESSWAY\b/g, 'EXPY'],
+    [/\bNORTH\b/g, 'N'],    [/\bSOUTH\b/g, 'S'],   [/\bEAST\b/g, 'E'],  [/\bWEST\b/g, 'W'],
+    [/\bSUITE\b/g, 'STE'],
+  ];
+  for (const [pattern, abbrev] of abbrevs) s = s.replace(pattern, abbrev);
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 export function buildSocrataWhere(searchTerm, cityFilter) {
   const parts = [];
   if (searchTerm) {
+    // Strip apostrophes and hyphens from the search term so it can match DB entries
+    // that have them (e.g. user types "JULIOS" → also matches "JULIO'S" in the DB)
+    const stripped = searchTerm.replace(/['’\-]/g, '');
     parts.push(
-      `(upper(location_name) like '%${searchTerm}%' OR upper(taxpayer_name) like '%${searchTerm}%' OR upper(location_address) like '%${searchTerm}%')`
+      `(upper(location_name) like '%${searchTerm}%'` +
+      ` OR upper(taxpayer_name) like '%${searchTerm}%'` +
+      ` OR upper(location_address) like '%${searchTerm}%'` +
+      // These two clauses strip apostrophes+hyphens from the DB field before comparing,
+      // so a search for JULIOS will match a DB entry named JULIO'S
+      ` OR replace(replace(upper(location_name), '''', ''), '-', '') like '%${stripped}%'` +
+      ` OR replace(replace(upper(taxpayer_name), '''', ''), '-', '') like '%${stripped}%')`,
     );
   }
   if (cityFilter) {
