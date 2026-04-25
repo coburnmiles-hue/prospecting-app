@@ -77,7 +77,7 @@ export default function AccountComparison({ savedAccounts, onClose }) {
   }, [selected]);
 
   return (
-    <div className="bg-[#0F172A] rounded-3xl border border-slate-700 p-6 space-y-5">
+    <div className="bg-[#0F172A] rounded-3xl border border-slate-700 p-4 sm:p-6 space-y-4 w-full overflow-hidden">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-[13px] font-black uppercase tracking-widest text-white">
@@ -98,93 +98,97 @@ export default function AccountComparison({ savedAccounts, onClose }) {
         )}
       </div>
 
-      <div className="grid lg:grid-cols-5 gap-5 min-w-0">
-        {/* Selector — 2 cols */}
-        <div className="lg:col-span-2 space-y-2">
-          <input
-            type="text"
-            placeholder="Search accounts..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
-          />
-          <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
-            {selected.length} / 5 selected
-          </div>
-          <div className="space-y-1.5 max-h-[280px] overflow-y-auto custom-scroll">
-            {filtered.map((a) => {
-              const idx = selected.findIndex((s) => s.id === a.id);
-              const isSelected = idx >= 0;
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => toggle(a)}
-                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl border transition-all text-[11px] ${
+      {/* Selector — full width on mobile, 2/5 on lg */}
+      <div className="space-y-2">
+        <input
+          type="text"
+          placeholder="Search accounts..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+        />
+        <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+          {selected.length} / 5 selected
+        </div>
+        <div className="flex flex-wrap gap-1.5 max-h-[160px] overflow-y-auto custom-scroll">
+          {filtered.map((a) => {
+            const idx = selected.findIndex((s) => s.id === a.id);
+            const isSelected = idx >= 0;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => toggle(a)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all text-[10px] ${
+                  isSelected
+                    ? "border-indigo-500/50 bg-indigo-900/20 text-white"
+                    : "border-slate-700/50 bg-slate-800/30 text-slate-400 hover:text-white hover:border-slate-500"
+                }`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0 border-2"
+                  style={
                     isSelected
-                      ? "border-indigo-500/50 bg-indigo-900/20 text-white"
-                      : "border-slate-700/50 bg-slate-800/30 text-slate-400 hover:text-white hover:border-slate-500"
-                  }`}
-                >
-                  <span
-                    className="w-3 h-3 rounded-full shrink-0 border-2"
-                    style={
-                      isSelected
-                        ? { backgroundColor: COLORS[idx], borderColor: COLORS[idx] }
-                        : { borderColor: "#475569" }
-                    }
-                  />
-                  <span className="truncate font-bold">{a.name}</span>
-                </button>
-              );
-            })}
-          </div>
+                      ? { backgroundColor: COLORS[idx], borderColor: COLORS[idx] }
+                      : { borderColor: "#475569" }
+                  }
+                />
+                <span className="truncate font-bold max-w-[120px]">{a.name}</span>
+              </button>
+            );
+          })}
         </div>
+      </div>
 
-        {/* Chart — 3 cols */}
-        <div className="lg:col-span-3 min-w-0 overflow-hidden">
-          {selected.length === 0 ? (
-            <div className="h-[300px] flex items-center justify-center text-slate-600 text-[11px] font-bold uppercase tracking-widest text-center leading-6">
-              Select accounts<br />to compare
-            </div>
-          ) : chartData.length === 0 ? (
-            <div className="h-[300px] flex items-center justify-center text-slate-600 text-[11px] font-bold uppercase tracking-widest">
-              No stored sales data
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="month" tick={{ fill: "#64748b", fontSize: 9 }} />
-                <YAxis
-                  tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
-                  tick={{ fill: "#64748b", fontSize: 9 }}
+      {/* Chart — always full width */}
+      <div className="w-full" style={{ minWidth: 0 }}>
+        {selected.length === 0 ? (
+          <div className="h-[220px] flex items-center justify-center text-slate-600 text-[11px] font-bold uppercase tracking-widest text-center leading-6">
+            Select accounts<br />to compare
+          </div>
+        ) : chartData.length === 0 ? (
+          <div className="h-[220px] flex items-center justify-center text-slate-600 text-[11px] font-bold uppercase tracking-widest">
+            No stored sales data
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={chartData} margin={{ top: 5, right: 8, left: -8, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis
+                dataKey="month"
+                tick={{ fill: "#64748b", fontSize: 8 }}
+                interval="preserveStartEnd"
+                tickLine={false}
+              />
+              <YAxis
+                tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+                tick={{ fill: "#64748b", fontSize: 8 }}
+                width={36}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "#1E293B",
+                  border: "1px solid #475569",
+                  borderRadius: 8,
+                  fontSize: 10,
+                }}
+                formatter={(v) => [formatCurrency(v), ""]}
+              />
+              <Legend wrapperStyle={{ fontSize: 8, color: "#94a3b8" }} />
+              {selected.map((a, i) => (
+                <Line
+                  key={a.id}
+                  type="monotone"
+                  dataKey={a.name}
+                  stroke={COLORS[i]}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 3 }}
                 />
-                <Tooltip
-                  contentStyle={{
-                    background: "#1E293B",
-                    border: "1px solid #475569",
-                    borderRadius: 8,
-                    fontSize: 10,
-                  }}
-                  formatter={(v) => [formatCurrency(v), ""]}
-                />
-                <Legend wrapperStyle={{ fontSize: 9, color: "#94a3b8" }} />
-                {selected.map((a, i) => (
-                  <Line
-                    key={a.id}
-                    type="monotone"
-                    dataKey={a.name}
-                    stroke={COLORS[i]}
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 3 }}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
