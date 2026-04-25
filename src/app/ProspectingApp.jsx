@@ -56,6 +56,10 @@ import GpvTierPanel from "../components/cards/GpvTierPanel";
 import PersonalMetrics from "../components/cards/PersonalMetrics";
 import TodayReminders from "../components/cards/TodayReminders";
 import TerritoryPanel from "../components/cards/TerritoryPanel";
+import PipelineBoard from "../components/cards/PipelineBoard";
+import VisitAlertsPanel from "../components/cards/VisitAlertsPanel";
+import TrendAlertsPanel from "../components/cards/TrendAlertsPanel";
+import AccountComparison from "../components/cards/AccountComparison";
 
 // Utils and Constants
 import { 
@@ -183,6 +187,7 @@ export default function ProspectingApp() {
 
   const [savedSearchTerm, setSavedSearchTerm] = useState("");
   const [savedFlagFilters, setSavedFlagFilters] = useState(new Set()); // set of flag keys
+  const [savedPanelMode, setSavedPanelMode] = useState("list"); // "list" | "pipeline" | "compare"
   const [selectedEstablishment, setSelectedEstablishment] = useState(null); // { info, history, notes? }
   const [topViewMode, setTopViewMode] = useState("list"); // list | map
   const [topMapPinsLoading, setTopMapPinsLoading] = useState(false);
@@ -245,10 +250,12 @@ export default function ProspectingApp() {
   // Map
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
+  const mapTileLayerRef = useRef(null); // current base tile layer (swappable)
   const markersRef = useRef({});
   const restaurantMarkersRef = useRef([]);
   const userLocationLayerRef = useRef(null);
   const LABEL_ZOOM_THRESHOLD = 13;
+  const [mapTheme, setMapTheme] = useState("dark"); // "dark" | "light"
   const [legendOpen, setLegendOpen] = useState(true);
   const [gpvTiersOpen, setGpvTiersOpen] = useState(false);
   const [hoursFilterOpen, setHoursFilterOpen] = useState(false);
@@ -296,6 +303,7 @@ export default function ProspectingApp() {
   const [coordEditorOpen, setCoordEditorOpen] = useState(false);
   const historicalChartRef = useRef(null);
   const [historicalChartWidth, setHistoricalChartWidth] = useState(0);
+  const [historyWindow, setHistoryWindow] = useState(12); // 12 or 24 months
   // Manual add account state
   const [manualAddOpen, setManualAddOpen] = useState(false);
   const [manualQuery, setManualQuery] = useState("");
@@ -491,7 +499,7 @@ export default function ProspectingApp() {
             const where = buildSocrataWhere(searchName, searchCity);
             const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
               `${DATE_FIELD} DESC`
-            )}&$limit=12`;
+            )}&$limit=24`;
 
             const salesRes = await fetch(`${BASE_URL}${query}`);
             if (salesRes.ok) {
@@ -538,7 +546,7 @@ export default function ProspectingApp() {
             const where = `upper(location_address) LIKE '%${searchAddress.split(' ')[0]}%' AND upper(location_city) LIKE '%AUSTIN%'`;
             const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
               `${DATE_FIELD} DESC`
-            )}&$limit=12`;
+            )}&$limit=24`;
             const salesRes = await fetch(`${BASE_URL}${query}`);
             if (salesRes.ok) {
               const salesData = await salesRes.json();
@@ -629,6 +637,35 @@ export default function ProspectingApp() {
     }
   };
 
+  // Background-refresh Socrata history to 24 months whenever a TABC account is selected
+  // (handles saved-account loads which only have cached/12-month history in stored notes)
+  const selectedTaxpayer = selectedEstablishment?.info?.taxpayer_number;
+  const selectedLocation = selectedEstablishment?.info?.location_number;
+  useEffect(() => {
+    if (!selectedTaxpayer || !selectedLocation) return;
+    let cancelled = false;
+    const where = `taxpayer_number = '${selectedTaxpayer}' AND location_number = '${selectedLocation}'`;
+    const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=24`;
+    fetch(`${BASE_URL}${query}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(hist => {
+        if (cancelled || !Array.isArray(hist) || hist.length === 0) return;
+        const reversed = [...hist].reverse();
+        const freshHistory = reversed.map(h => ({
+          month: monthLabelFromDate(h[DATE_FIELD]),
+          liquor: Number(h.liquor_receipts || 0),
+          beer: Number(h.beer_receipts || 0),
+          wine: Number(h.wine_receipts || 0),
+          total: Number(h[TOTAL_FIELD] || 0),
+          rawDate: h[DATE_FIELD],
+        }));
+        setSelectedEstablishment(s => s ? { ...s, history: freshHistory } : s);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTaxpayer, selectedLocation]);
+
   // ---------- Select + load history ----------
   const analyze = async (est) => {
     setError("");
@@ -656,7 +693,7 @@ export default function ProspectingApp() {
       const where = `taxpayer_number = '${est.taxpayer_number}' AND location_number = '${est.location_number}'`;
       const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
         `${DATE_FIELD} DESC`
-      )}&$limit=12`;
+      )}&$limit=24`;
 
       const res = await fetch(`${BASE_URL}${query}`);
       if (!res.ok) throw new Error(`History error (${res.status})`);
@@ -1628,7 +1665,7 @@ export default function ProspectingApp() {
       }
 
       baseLayer.addTo(mapInstance.current);
-      // Debug tile events and fallback to OSM if tiles don't load
+      mapTileLayerRef.current = baseLayer;
       try {
         let tileLoaded = false;
         baseLayer.on && baseLayer.on('tileerror', (err) => console.warn('Leaflet tileerror', err));
@@ -2165,7 +2202,7 @@ export default function ProspectingApp() {
             const searchName = row.location_name.toUpperCase();
             const searchCity = row.location_city.toUpperCase();
             const where = buildSocrataWhere(searchName, searchCity);
-            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=12`;
+            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=24`;
             const res = await fetch(`${BASE_URL}${query}`);
             let history = [];
             if (res.ok) {
@@ -3451,6 +3488,38 @@ export default function ProspectingApp() {
     };
   }, [setViewMode, setSavedSubView, savedAccounts, refreshSavedAccounts, selectedEstablishment, setSelectedEstablishment]);
 
+  // Swap tile layer when mapTheme changes
+  useEffect(() => {
+    const L = window.L;
+    if (!L || !mapInstance.current) return;
+    // Remove existing tile layer
+    if (mapTileLayerRef.current) {
+      mapInstance.current.removeLayer(mapTileLayerRef.current);
+    }
+    let newLayer;
+    if (mapTheme === "light") {
+      if (MAPBOX_KEY) {
+        newLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+          tileSize: 512, zoomOffset: -1, maxZoom: 22,
+        });
+      } else {
+        newLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 });
+      }
+    } else {
+      if (MAPBOX_KEY) {
+        newLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+          tileSize: 512, zoomOffset: -1, maxZoom: 22,
+        });
+      } else {
+        newLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 19 });
+      }
+    }
+    newLayer.addTo(mapInstance.current);
+    // Ensure tile layer sits beneath markers (z-index pane)
+    newLayer.bringToBack();
+    mapTileLayerRef.current = newLayer;
+  }, [mapTheme]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fly map to user's current location (if available)
   const handleMyLocation = () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -3658,6 +3727,118 @@ export default function ProspectingApp() {
       setFollowupsList([]);
     }
   }, [filteredSavedAccounts, viewMode]);
+
+  // Weekly digest metrics
+  const weeklyDigest = useMemo(() => {
+    const now = new Date();
+    const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    let notesThisWeek = 0;
+    const accountsVisited = new Set();
+    let upcomingFollowups = 0;
+    let activeOpps = 0;
+    let hotLeads = 0;
+    (savedAccounts || []).forEach(a => {
+      try {
+        const p = parseSavedNotes(a.notes);
+        (p?.notes || []).forEach(n => {
+          const d = new Date(n.created_at);
+          if (d >= weekAgo) { notesThisWeek++; accountsVisited.add(a.id); }
+        });
+        (p?.followups || []).filter(f => !f.completed).forEach(f => {
+          const d = new Date(f.follow_up_at);
+          if (d >= now && d <= nextWeek) upcomingFollowups++;
+        });
+        if (p?.activeOpp) activeOpps++;
+        if (p?.hotLead) hotLeads++;
+      } catch {}
+    });
+    return {
+      notesThisWeek,
+      accountsVisited: accountsVisited.size,
+      upcomingFollowups,
+      activeOpps,
+      hotLeads,
+      totalAccounts: (savedAccounts || []).length,
+    };
+  }, [savedAccounts]);
+
+  // CSV export
+  const exportAccountsCSV = () => {
+    const rows = [[
+      'Name', 'Address', 'GPV Tier', 'Active Opp', 'Active Account',
+      'Hot Lead', 'Referral', 'Strategic', 'Closed Lost', 'Notes', 'Last Activity'
+    ]];
+    (savedAccounts || []).forEach(a => {
+      try {
+        const p = parseSavedNotes(a.notes);
+        const notes = Array.isArray(p?.notes) ? p.notes : [];
+        const lastNote = notes.length > 0
+          ? [...notes].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))[0].created_at?.slice(0, 10)
+          : '';
+        rows.push([
+          a.name || '', a.address || '', p?.gpvTier || '',
+          p?.activeOpp ? 'Yes' : 'No', p?.activeAccount ? 'Yes' : 'No',
+          p?.hotLead ? 'Yes' : 'No', p?.referral ? 'Yes' : 'No',
+          p?.strategic ? 'Yes' : 'No', p?.closedLost ? 'Yes' : 'No',
+          notes.length, lastNote || ''
+        ]);
+      } catch {}
+    });
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement('a');
+    el.href = url;
+    el.download = `pipeline-${new Date().toISOString().slice(0, 10)}.csv`;
+    el.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Navigate from any panel to a saved account detail
+  const navigateToAccount = (accountId) => {
+    const account = (savedAccounts || []).find(a => a.id === accountId);
+    if (!account) return;
+    setViewMode('saved');
+    // Directly set all state the same way handleListItemClick does for saved accounts
+    try {
+      const parsed = parseSavedNotes(account.notes);
+      const keyParts = parsed?.key ? parsed.key.split('-') : [];
+      setSelectedGpvTier(parsed?.gpvTier || null);
+      setSelectedActiveOpp(parsed?.activeOpp || false);
+      setSelectedClosedLost(parsed?.closedLost || false);
+      setSelectedReferral(parsed?.referral || false);
+      setSelectedHotLead(parsed?.hotLead || false);
+      setSelectedStrategic(parsed?.strategic || false);
+      setVenueTypeLocked(parsed?.venueTypeLocked || false);
+      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
+      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
+      setNotesOwner({ id: account.id, key: parsed.key || null });
+      if (parsed?.aiResponse) {
+        skipAiLookupRef.current = true;
+        setAiResponse(parsed.aiResponse);
+        setAiLoading(false);
+      } else {
+        skipAiLookupRef.current = false;
+        setAiResponse("");
+      }
+      setSelectedEstablishment({
+        info: {
+          id: account.id,
+          location_name: account.name,
+          location_address: account.address,
+          taxpayer_number: keyParts[0] || undefined,
+          location_number: keyParts[1] || undefined,
+          lat: account.lat,
+          lng: account.lng,
+          notes: account.notes,
+        },
+        history: Array.isArray(parsed?.history) ? parsed.history : [],
+      });
+    } catch (e) {
+      console.error('navigateToAccount failed', e);
+    }
+  };
 
   const listToRender = useMemo(() => {
     if (viewMode === "saved") return filteredSavedAccounts;
@@ -4255,7 +4436,7 @@ export default function ProspectingApp() {
     };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
+    <div className="min-h-screen text-slate-100 font-sans p-4 md:p-8 selection:bg-indigo-500/30">
       {/* Header with Logout Button */}
       <header className="max-w-6xl mx-auto mb-10 flex justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
@@ -4266,7 +4447,7 @@ export default function ProspectingApp() {
             <h1 className="text-2xl sm:text-3xl lg:text-4xl text-white tracking-tighter uppercase italic leading-tight">
               <span className="font-black">Pocket</span> <span className="font-normal">Prospector</span>
             </h1>
-            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v6.1</p>
+            <p className="text-[10px] sm:text-xs font-normal text-slate-500 normal-case not-italic tracking-wider mt-0.5">v7.0</p>
           </div>
         </div>
         <button
@@ -4284,7 +4465,7 @@ export default function ProspectingApp() {
       {/* Main */}
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
         {/* Left column */}
-        {viewMode !== "metrics" && viewMode !== "map" && (
+        {viewMode !== "metrics" && viewMode !== "map" && !(viewMode === "saved" && savedPanelMode !== "list") && (
           <aside className="lg:col-span-4 space-y-6">
             {viewMode === "saved" ? (
               <div className="space-y-3">
@@ -4454,7 +4635,7 @@ export default function ProspectingApp() {
                         const searchName = (result.name || "").toUpperCase();
                         const searchCity = (result.city || "").toUpperCase();
                         const where = buildSocrataWhere(searchName, searchCity);
-                        const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=12`;
+                        const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=24`;
                         const res = await fetch(`${BASE_URL}${query}`);
                         let history = [];
                         if (res.ok) {
@@ -4911,7 +5092,7 @@ export default function ProspectingApp() {
                           const where = buildSocrataWhere(searchName, searchCity);
                           const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(
                             `${DATE_FIELD} DESC`
-                          )}&$limit=12`;
+                          )}&$limit=24`;
 
                           const res = await fetch(`${BASE_URL}${query}`);
                           let history = [];
@@ -5075,7 +5256,7 @@ export default function ProspectingApp() {
                 <>
                   {listToRender.map(renderListItem)}
                   {listToRender.length === 0 && (
-                    <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-[#1E293B] border border-slate-700 rounded-3xl p-6">
+                    <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest bg-white/[0.04] backdrop-blur-md border border-white/[0.07] rounded-3xl p-6">
                       {viewMode === "saved"
                         ? "No saved accounts yet."
                         : viewMode === "top"
@@ -5091,7 +5272,58 @@ export default function ProspectingApp() {
         )}
 
         {/* Right column */}
-        <section className={(viewMode === "metrics" || viewMode === "map") ? "lg:col-span-12" : "lg:col-span-8"}>
+        <section className={(viewMode === "metrics" || viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"}>
+          {/* Saved sub-view tabs (always shown in saved mode) */}
+          {viewMode === "saved" && (
+            <div className="flex items-center gap-1.5 bg-[#1E293B] rounded-2xl border border-slate-700 p-1.5 mb-4">
+              {[
+                { id: "list", label: "📋 List" },
+                { id: "pipeline", label: "⚡ Pipeline" },
+                { id: "compare", label: "📊 Compare" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSavedPanelMode(tab.id)}
+                  className={`flex-1 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                    savedPanelMode === tab.id
+                      ? "bg-indigo-600 text-white shadow"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={exportAccountsCSV}
+                title="Export portfolio as CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-700/50 text-slate-400 hover:text-white hover:bg-slate-700 transition-all text-[10px] font-black uppercase tracking-widest"
+              >
+                ↓ CSV
+              </button>
+            </div>
+          )}
+
+          {/* Pipeline board */}
+          {viewMode === "saved" && savedPanelMode === "pipeline" && (
+            <PipelineBoard
+              savedAccounts={savedAccounts}
+              onAccountClick={(account) => {
+                navigateToAccount(account.id);
+              }}
+            />
+          )}
+
+          {/* Account comparison chart */}
+          {viewMode === "saved" && savedPanelMode === "compare" && (
+            <AccountComparison
+              savedAccounts={savedAccounts}
+              onClose={() => setSavedPanelMode("list")}
+            />
+          )}
+
           {viewMode === "top" && topViewMode === "map" && (
             <>
               <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden mb-3" style={{ height: 480, isolation: "isolate", zIndex: 0, position: "relative" }}>
@@ -5184,12 +5416,12 @@ export default function ProspectingApp() {
                       }
                     }}
                     onBlur={() => setTimeout(() => setShowMapSuggestions(false), 200)}
-                    className="w-full bg-slate-900/90 backdrop-blur-md border border-slate-700 text-white text-base rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xl"
+                    className="w-full map-glass text-white text-base rounded-xl pl-9 pr-3 py-2.5 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
                   />
                   
                   {/* Suggestions dropdown */}
                   {!restaurantSearchMode && showMapSuggestions && mapSearchSuggestions.length > 0 && (
-                    <div className="absolute top-full mt-2 left-0 right-0 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto">
+                    <div className="absolute top-full mt-2 left-0 right-0 map-glass rounded-xl overflow-hidden max-h-80 overflow-y-auto">
                       {mapSearchSuggestions.map((account) => {
                         const parsed = (() => {
                           try {
@@ -5243,13 +5475,13 @@ export default function ProspectingApp() {
                     </div>
                   )}
                 </div>
-                <div className="px-3 py-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700 text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2 shadow-xl">
+                <div className="px-3 py-2 map-glass rounded-xl text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
                   {restaurantSearchMode ? `${restaurantMarkers.length} RESTAURANTS` : `${savedAccounts.length} PINS`}
                 </div>
               </div>
 
-              <div className="absolute top-24 right-6 z-50 bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-xl p-3 text-xs text-slate-200 shadow-xl max-w-xs">
+              <div className="absolute top-24 right-6 z-50 map-glass rounded-xl p-3 text-xs text-slate-200 max-w-xs">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-black uppercase text-[10px] text-indigo-300">Map Filters</div>
                   <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
@@ -5318,7 +5550,7 @@ export default function ProspectingApp() {
                   </div>
 
                   {/* Filters Collapsible Section */}
-                  <div className="border-t border-slate-700 pt-2">
+                  <div className="pt-2">
                     <button
                       onClick={() => setFiltersOpen(o => !o)}
                       className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
@@ -5525,9 +5757,18 @@ export default function ProspectingApp() {
                 <button
                   onClick={handleMyLocation}
                   title="My location"
-                  className="p-4 rounded-2xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-indigo-400 hover:text-indigo-300 hover:bg-slate-800/90 transition-all shadow-2xl"
+                  className="p-4 rounded-2xl map-glass text-indigo-400 hover:text-indigo-300 transition-all"
                 >
                   <MapPin size={24} />
+                </button>
+
+                {/* Map theme toggle */}
+                <button
+                  onClick={() => setMapTheme(t => t === "dark" ? "light" : "dark")}
+                  title={mapTheme === "dark" ? "Switch to light map" : "Switch to dark map"}
+                  className="p-4 rounded-2xl map-glass text-slate-300 hover:text-white transition-all text-[18px] leading-none"
+                >
+                  {mapTheme === "dark" ? "☀️" : "🌙"}
                 </button>
 
                 {/* Find Restaurants Button */}
@@ -5542,7 +5783,7 @@ export default function ProspectingApp() {
                           }
                         }}
                         disabled={searchingRestaurants}
-                        className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur-md text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-xl"
+                        className="px-2.5 py-2 rounded-xl map-glass text-[7px] font-black uppercase text-slate-300 hover:text-white transition-colors disabled:opacity-50"
                       >
                         {searchingRestaurants ? '⏳' : '🍽️'} Restaurants
                       </button>
@@ -5554,7 +5795,7 @@ export default function ProspectingApp() {
                           }
                         }}
                         disabled={searchingRestaurants}
-                        className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur-md text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-xl"
+                        className="px-2.5 py-2 rounded-xl map-glass text-[7px] font-black uppercase text-slate-300 hover:text-white transition-colors disabled:opacity-50"
                       >
                         {searchingRestaurants ? '⏳' : '🍸'} Bars
                       </button>
@@ -5566,7 +5807,7 @@ export default function ProspectingApp() {
                           }
                         }}
                         disabled={searchingRestaurants}
-                        className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur-md text-[7px] font-black uppercase text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-xl"
+                        className="px-2.5 py-2 rounded-xl map-glass text-[7px] font-black uppercase text-slate-300 hover:text-white transition-colors disabled:opacity-50"
                       >
                         {searchingRestaurants ? '⏳' : '☕'} Cafes
                       </button>
@@ -5579,10 +5820,10 @@ export default function ProspectingApp() {
                       setRestaurantSearchQuery('');
                       setMapSearch('');
                     }}
-                    className={`px-3 py-2.5 rounded-2xl border text-[8px] font-black uppercase flex items-center gap-2 shadow-2xl whitespace-nowrap transition-colors backdrop-blur-md ${
+                    className={`px-3 py-2.5 rounded-2xl text-[8px] font-black uppercase flex items-center gap-2 whitespace-nowrap transition-colors ${
                       restaurantSearchMode
-                        ? 'bg-orange-900/60 border-orange-600 text-orange-300'
-                        : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:bg-slate-800/90'
+                        ? 'bg-orange-900/60 border border-orange-600 text-orange-300'
+                        : 'map-glass text-slate-300 hover:text-white'
                     }`}
                   >
                     🍽️ {restaurantSearchMode ? 'Restaurant Mode' : 'Find Restaurants'}
@@ -5620,7 +5861,7 @@ export default function ProspectingApp() {
 
               {/* Route Planning Panel */}
               {mapRoutePlanMode && (
-                <div className="mt-6 w-full bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-3xl p-5 shadow-2xl">
+                <div className="mt-6 w-full map-glass rounded-3xl p-5">
                   <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest mb-4">
                     Route Planning: {mapRouteStops.length} Stop{mapRouteStops.length !== 1 ? 's' : ''}
                   </div>
@@ -6246,8 +6487,8 @@ export default function ProspectingApp() {
               </div>
             </div>
           )}
-          {selectedEstablishment && (
-            <div className={viewMode === "map" ? "mt-6 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : "space-y-6 animate-in slide-in-from-bottom-4 duration-500"}>
+          {selectedEstablishment && !(viewMode === "saved" && savedPanelMode === "compare") && (
+            <div className={viewMode === "map" ? "mt-6 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : (viewMode === "saved" && savedPanelMode === "pipeline") ? "mt-8 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : "space-y-6 animate-in slide-in-from-bottom-4 duration-500"}>
               {/* Manual account banner */}
               {(() => {
                 try {
@@ -6528,16 +6769,35 @@ export default function ProspectingApp() {
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">
-                  <h3 className="text-[10px] font-black uppercase italic tracking-widest text-white mb-6">
-                    Historical Volume
-                  </h3>
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-[10px] font-black uppercase italic tracking-widest text-white">
+                      Historical Volume
+                    </h3>
+                    <div className="flex items-center gap-1 bg-slate-800/60 rounded-xl p-0.5">
+                      {[12, 24].map(w => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() => setHistoryWindow(w)}
+                          className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                            historyWindow === w
+                              ? 'bg-indigo-600 text-white shadow'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {w}mo
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   {(() => {
-                    const history = selectedEstablishment.history || [];
+                    const allHistory = selectedEstablishment.history || [];
+                    const history = allHistory.slice(-historyWindow);
                     const hasBreakdown = history.some(h => h.liquor > 0 || h.beer > 0 || h.wine > 0);
                     const hasAnyData = history.some(h => h.total > 0);
 
-                    if (history.length === 0 || !hasAnyData) {
+                    if (allHistory.length === 0 || !hasAnyData) {
                       return (
                         <div ref={historicalChartRef} className="h-[260px] min-h-[260px] w-full min-w-0 mt-2 flex items-center justify-center text-slate-600 text-[11px] font-black uppercase tracking-widest">
                           No Sales Data Available
@@ -6667,7 +6927,7 @@ export default function ProspectingApp() {
       {/* Fixed Bottom Navigation Dock */}
       <nav className="fixed bottom-0 left-0 right-0 z-[9999] pb-safe pointer-events-none">
         <div className="max-w-3xl mx-auto px-4 pb-4">
-          <div className="flex gap-2 bg-[#1E293B]/95 backdrop-blur-lg p-2 rounded-3xl border border-slate-700 shadow-2xl pointer-events-auto">
+          <div className="dock-glass flex gap-2 p-2 rounded-3xl pointer-events-auto">
             <button
               onClick={() => {
                 setViewMode("search");
@@ -6675,7 +6935,7 @@ export default function ProspectingApp() {
                 setSelectedEstablishment(null);
                 setAiResponse("");
               }}
-              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "search" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "search" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <Search size={18} className="mb-1" />
               <span>Search</span>
@@ -6688,7 +6948,7 @@ export default function ProspectingApp() {
                 setSelectedEstablishment(null);
                 setAiResponse("");
               }}
-              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "top" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "top" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <Trophy size={18} className="mb-1" />
               <span>Leaders</span>
@@ -6700,7 +6960,7 @@ export default function ProspectingApp() {
                 setSelectedEstablishment(null);
                 setAiResponse("");
               }}
-              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "saved" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "saved" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <Bookmark size={18} className="mb-1" />
               <span>Saved</span>
@@ -6713,7 +6973,7 @@ export default function ProspectingApp() {
                 setSelectedEstablishment(null);
                 setAiResponse("");
               }}
-              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "metrics" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "metrics" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <TrendingUp size={18} className="mb-1" />
               <span>Data</span>
@@ -6726,7 +6986,7 @@ export default function ProspectingApp() {
                 setSelectedEstablishment(null);
                 setAiResponse("");
               }}
-              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "nro" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "nro" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <div className="relative">
                 <Sparkles size={18} className="mb-1" />
@@ -6744,7 +7004,7 @@ export default function ProspectingApp() {
                 setViewMode("map");
                 setSelectedEstablishment(null);
               }}
-              className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "map" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "map" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <MapIcon size={18} className="mb-1" />
               <span>Map</span>
@@ -6755,6 +7015,74 @@ export default function ProspectingApp() {
 
       {/* Small CSS helpers */}
       <style>{`
+        /* ── Liquid-glass dock ─────────────────────────────────────────── */
+        .dock-glass {
+          background: rgba(15, 23, 42, 0.22);
+          backdrop-filter: blur(8px) saturate(200%);
+          -webkit-backdrop-filter: blur(8px) saturate(200%);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          box-shadow:
+            0 8px 32px rgba(0, 0, 0, 0.55),
+            0 1px 0 rgba(255, 255, 255, 0.08) inset,
+            0 -1px 0 rgba(0, 0, 0, 0.3) inset;
+          position: relative;
+          overflow: hidden;
+        }
+        /* top sheen — the "glass surface" reflection */
+        .dock-glass::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          background: linear-gradient(
+            160deg,
+            rgba(255,255,255,0.10) 0%,
+            rgba(255,255,255,0.03) 40%,
+            transparent 60%
+          );
+          pointer-events: none;
+        }
+        /* active tab: indigo pill with glass tint */
+        .dock-item-active {
+          background: linear-gradient(
+            135deg,
+            rgba(99, 102, 241, 0.85) 0%,
+            rgba(79, 70, 229, 0.90) 100%
+          );
+          box-shadow:
+            0 2px 12px rgba(99, 102, 241, 0.50),
+            0 1px 0 rgba(255,255,255,0.18) inset;
+        }
+        .dock-item:not(.dock-item-active):hover {
+          background: rgba(255,255,255,0.06);
+        }
+        /* ── end liquid-glass dock ─────────────────────────────────────── */
+
+        /* ── 3D card hover lift ──────────────────────────────────────────── */
+        /* Cards gain extra lift + brighter top-edge on hover */
+        [class*="bg-[#1E293B]"]:not([class*="pointer-events-none"]) {
+          transition: box-shadow 0.2s ease, transform 0.2s ease;
+        }
+        [class*="rounded-3xl"][class*="bg-[#1E293B]"]:hover,
+        [class*="rounded-\\[2\\.5rem\\]"][class*="bg-[#1E293B]"]:hover {
+          box-shadow:
+            0 1px 0  rgba(255,255,255,0.10) inset,
+            0 -1px 0 rgba(0,0,0,0.30) inset,
+            0 16px 48px rgba(0,0,0,0.55),
+            0 4px 12px rgba(0,0,0,0.35);
+        }
+
+        /* ── Button press depth ─────────────────────────────────────────── */
+        button:active:not(:disabled) {
+          transform: translateY(1px) scale(0.985);
+        }
+
+        /* ── Input depth ────────────────────────────────────────────────── */
+        input[type="text"], input[type="search"], textarea {
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4) inset, 0 1px 0 rgba(255,255,255,0.04);
+        }
+        /* ─────────────────────────────────────────────────────────────── */
+
         .custom-scroll::-webkit-scrollbar { width: 4px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
         .leaflet-container { background: #020617 !important; border: none; }

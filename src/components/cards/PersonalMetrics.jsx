@@ -245,120 +245,6 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
       </div>
 
       {/* Follow-up Alerts */}
-      {(() => {
-        const now = new Date();
-        const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const visibleAlerts = showAllAlerts
-          ? allPendingAlerts
-          : allPendingAlerts.filter(a => new Date(a.follow_up_at) <= in7Days);
-        const hiddenCount = allPendingAlerts.length - allPendingAlerts.filter(a => new Date(a.follow_up_at) <= in7Days).length;
-
-        return (
-          <div className="bg-gradient-to-br from-amber-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-black text-white">
-                Follow-up Alerts
-                {allPendingAlerts.length > 0 && (
-                  <span className="ml-2 text-xs font-bold text-amber-400 bg-amber-900/50 px-2 py-0.5 rounded-full">{allPendingAlerts.length}</span>
-                )}
-              </h2>
-              <div className="flex items-center gap-2">
-                {hiddenCount > 0 && (
-                  <button
-                    onClick={() => setShowAllAlerts(v => !v)}
-                    className="text-xs font-bold text-amber-300 bg-amber-900/40 hover:bg-amber-800/60 border border-amber-700/50 px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    {showAllAlerts ? 'Show fewer' : `View all (${allPendingAlerts.length})`}
-                  </button>
-                )}
-                <Target className="text-amber-300" size={20} />
-              </div>
-            </div>
-
-            {visibleAlerts.length > 0 ? (
-              <div className="space-y-3">
-                {visibleAlerts.map((alert) => {
-                  const followUpDate = new Date(alert.follow_up_at);
-                  const msUntil = followUpDate - now;
-                  const daysUntil = Math.ceil(msUntil / (1000 * 60 * 60 * 24));
-                  const isOverdue = daysUntil < 0;
-                  const isDueToday = daysUntil === 0;
-
-                  return (
-                    <div
-                      key={`alert-${alert.id}-${alert.account_id}`}
-                      className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 ${
-                            isOverdue ? 'bg-red-500' : isDueToday ? 'bg-orange-400' : 'bg-amber-400'
-                          }`} />
-                          <div className="min-w-0">
-                            <button
-                              onClick={() => onActivityClick && onActivityClick(alert.account_id)}
-                              className="text-xs font-semibold uppercase text-slate-400 hover:text-amber-300 transition-colors text-left"
-                            >
-                              {alert.account_name}
-                            </button>
-                            <div className="text-sm text-slate-300 mt-0.5 break-words">
-                              {alert.follow_up_note || alert.text}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                          <div className={`text-xs font-bold ${
-                            isOverdue ? 'text-red-400' : isDueToday ? 'text-orange-400' : 'text-amber-400'
-                          }`}>
-                            {isOverdue
-                              ? `${Math.abs(daysUntil)}d overdue`
-                              : isDueToday
-                              ? 'Due today'
-                              : `In ${daysUntil}d`}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            {followUpDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                          </div>
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              setCompletingFollowupId(alert.id);
-                              try {
-                                await fetch('/api/notes', {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  credentials: 'include',
-                                  body: JSON.stringify({ accountId: alert.account_id, followupId: alert.id, complete: true }),
-                                });
-                                if (refreshSavedAccounts) await refreshSavedAccounts();
-                              } catch (err) {
-                                console.error('Failed to complete followup:', err);
-                              } finally {
-                                setCompletingFollowupId(null);
-                              }
-                            }}
-                            disabled={completingFollowupId === alert.id}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50"
-                          >
-                            {completingFollowupId === alert.id ? '...' : 'Clear'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-slate-400 text-sm">
-                {allPendingAlerts.length === 0
-                  ? 'No pending follow-up alerts.'
-                  : 'No alerts due in the next 7 days.'}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
       {/* Prospecting Metrics - Calculated from App Data */}
       {calculatedMetrics && (
         <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
@@ -527,6 +413,121 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
           })()}
         </div>
       )}
+
+      {/* Follow-up Alerts */}
+      {(() => {
+        const now = new Date();
+        const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const visibleAlerts = showAllAlerts
+          ? allPendingAlerts
+          : allPendingAlerts.filter(a => new Date(a.follow_up_at) <= in7Days);
+        const hiddenCount = allPendingAlerts.length - allPendingAlerts.filter(a => new Date(a.follow_up_at) <= in7Days).length;
+
+        return (
+          <div className="bg-gradient-to-br from-amber-900 via-slate-900 to-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-black text-white">
+                Follow-up Alerts
+                {allPendingAlerts.length > 0 && (
+                  <span className="ml-2 text-xs font-bold text-amber-400 bg-amber-900/50 px-2 py-0.5 rounded-full">{allPendingAlerts.length}</span>
+                )}
+              </h2>
+              <div className="flex items-center gap-2">
+                {hiddenCount > 0 && (
+                  <button
+                    onClick={() => setShowAllAlerts(v => !v)}
+                    className="text-xs font-bold text-amber-300 bg-amber-900/40 hover:bg-amber-800/60 border border-amber-700/50 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    {showAllAlerts ? 'Show fewer' : `View all (${allPendingAlerts.length})`}
+                  </button>
+                )}
+                <Target className="text-amber-300" size={20} />
+              </div>
+            </div>
+
+            {visibleAlerts.length > 0 ? (
+              <div className="space-y-3">
+                {visibleAlerts.map((alert) => {
+                  const followUpDate = new Date(alert.follow_up_at);
+                  const msUntil = followUpDate - now;
+                  const daysUntil = Math.ceil(msUntil / (1000 * 60 * 60 * 24));
+                  const isOverdue = daysUntil < 0;
+                  const isDueToday = daysUntil === 0;
+
+                  return (
+                    <div
+                      key={`alert-${alert.id}-${alert.account_id}`}
+                      className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 ${
+                            isOverdue ? 'bg-red-500' : isDueToday ? 'bg-orange-400' : 'bg-amber-400'
+                          }`} />
+                          <div className="min-w-0">
+                            <button
+                              onClick={() => onActivityClick && onActivityClick(alert.account_id)}
+                              className="text-xs font-semibold uppercase text-slate-400 hover:text-amber-300 transition-colors text-left"
+                            >
+                              {alert.account_name}
+                            </button>
+                            <div className="text-sm text-slate-300 mt-0.5 break-words">
+                              {alert.follow_up_note || alert.text}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                          <div className={`text-xs font-bold ${
+                            isOverdue ? 'text-red-400' : isDueToday ? 'text-orange-400' : 'text-amber-400'
+                          }`}>
+                            {isOverdue
+                              ? `${Math.abs(daysUntil)}d overdue`
+                              : isDueToday
+                              ? 'Due today'
+                              : `In ${daysUntil}d`}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {followUpDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </div>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              setCompletingFollowupId(alert.id);
+                              try {
+                                await fetch('/api/notes', {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  credentials: 'include',
+                                  body: JSON.stringify({ accountId: alert.account_id, followupId: alert.id, complete: true }),
+                                });
+                                if (refreshSavedAccounts) await refreshSavedAccounts();
+                              } catch (err) {
+                                console.error('Failed to complete followup:', err);
+                              } finally {
+                                setCompletingFollowupId(null);
+                              }
+                            }}
+                            disabled={completingFollowupId === alert.id}
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            {completingFollowupId === alert.id ? '...' : 'Clear'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                {allPendingAlerts.length === 0
+                  ? 'No pending follow-up alerts.'
+                  : 'No alerts due in the next 7 days.'}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

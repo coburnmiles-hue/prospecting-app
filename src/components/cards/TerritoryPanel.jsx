@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { MapPin, RefreshCw, Plus, X, CheckCircle, AlertTriangle, Loader2, Clock } from "lucide-react";
+import { MapPin, RefreshCw, Plus, X, CheckCircle, AlertTriangle, Loader2, Clock, ChevronDown } from "lucide-react";
 
 const LICENSE_TYPE_LABELS = {
   BE: "Beer/Wine – Eating Place",
@@ -41,6 +41,7 @@ function formatDate(iso) {
 export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnacknowledgedChange }) {
   const [zipCodes, setZipCodes] = useState([]);
   const [newZip, setNewZip] = useState("");
+  const [zipsOpen, setZipsOpen] = useState(false);
   const [results, setResults] = useState([]);
   const [acknowledgedIds, setAcknowledgedIds] = useState([]);
   const [lastSearchedAt, setLastSearchedAt] = useState(null);
@@ -186,61 +187,86 @@ export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnackn
     <div className="space-y-5">
       {/* Zip Code Manager */}
       <div className="bg-[#1E293B] p-5 rounded-3xl border border-slate-700/50">
-        <div className="flex items-center justify-between mb-4">
+        {/* Header row — always visible, click to toggle */}
+        <button
+          type="button"
+          onClick={() => setZipsOpen((o) => !o)}
+          className="w-full flex items-center justify-between mb-0 group"
+        >
           <div>
             <h3 className="text-[11px] font-black uppercase tracking-widest text-indigo-400">
               My Territory Zip Codes
+              {zipCodes.length > 0 && (
+                <span className="ml-2 text-slate-500 normal-case font-bold text-[10px]">
+                  ({zipCodes.length})
+                </span>
+              )}
             </h3>
-            <p className="text-slate-500 text-[10px] mt-0.5">
+            {!zipsOpen && (
+              <p className="text-slate-500 text-[10px] mt-0.5">
+                Searches run automatically every morning at 7 AM
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {saving && <span className="text-[10px] text-slate-500 italic">Saving…</span>}
+            <ChevronDown
+              size={14}
+              className={`text-slate-500 transition-transform duration-200 ${zipsOpen ? "rotate-180" : ""}`}
+            />
+          </div>
+        </button>
+
+        {/* Collapsible body */}
+        {zipsOpen && (
+          <div className="mt-4 space-y-3">
+            <p className="text-slate-500 text-[10px]">
               Searches run automatically every morning at 7 AM
             </p>
-          </div>
-          {saving && (
-            <span className="text-[10px] text-slate-500 italic">Saving…</span>
-          )}
-        </div>
 
-        {/* Zip input */}
-        <div className="flex gap-2 mb-3">
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={5}
-            value={newZip}
-            onChange={(e) => setNewZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
-            onKeyDown={(e) => e.key === "Enter" && addZip()}
-            placeholder="Add zip code (e.g. 78701)"
-            className="flex-1 bg-[#0F172A] border border-slate-700 px-4 py-2.5 rounded-xl text-[12px] font-bold text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
-          />
-          <button
-            onClick={addZip}
-            disabled={newZip.length !== 5}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl transition-all"
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-
-        {/* Zip tags */}
-        {zipCodes.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {zipCodes.map((zip) => (
-              <div
-                key={zip}
-                className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl"
+            {/* Zip input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={5}
+                value={newZip}
+                onChange={(e) => setNewZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
+                onKeyDown={(e) => e.key === "Enter" && addZip()}
+                placeholder="Add zip code (e.g. 78701)"
+                className="flex-1 bg-[#0F172A] border border-slate-700 px-4 py-2.5 rounded-xl text-[12px] font-bold text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+              />
+              <button
+                onClick={addZip}
+                disabled={newZip.length !== 5}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl transition-all"
               >
-                <span className="text-[11px] font-black text-slate-200">{zip}</span>
-                <button
-                  onClick={() => removeZip(zip)}
-                  className="text-slate-500 hover:text-rose-400 transition-colors"
-                >
-                  <X size={12} />
-                </button>
+                <Plus size={16} />
+              </button>
+            </div>
+
+            {/* Zip tags */}
+            {zipCodes.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {zipCodes.map((zip) => (
+                  <div
+                    key={zip}
+                    className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl"
+                  >
+                    <span className="text-[11px] font-black text-slate-200">{zip}</span>
+                    <button
+                      onClick={() => removeZip(zip)}
+                      className="text-slate-500 hover:text-rose-400 transition-colors"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <p className="text-slate-600 text-[11px] italic">No zip codes added yet.</p>
+            )}
           </div>
-        ) : (
-          <p className="text-slate-600 text-[11px] italic">No zip codes added yet.</p>
         )}
       </div>
 

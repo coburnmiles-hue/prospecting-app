@@ -17,7 +17,21 @@ body {
 
 body {
   margin: 0;
-  background: linear-gradient(135deg, #0f1420 0%, #1a2847 100%);
+  background:
+    /* top-left: soft indigo bloom */
+    radial-gradient(ellipse 80% 60% at 10% 5%,   rgba(99,102,241,0.18) 0%, transparent 55%),
+    /* top-right: faint violet accent */
+    radial-gradient(ellipse 55% 45% at 92% 0%,   rgba(139,92,246,0.12) 0%, transparent 50%),
+    /* center: very subtle purple warmth */
+    radial-gradient(ellipse 60% 50% at 50% 45%,  rgba(79,70,229,0.06) 0%, transparent 65%),
+    /* bottom-right: emerald/teal ambient */
+    radial-gradient(ellipse 65% 50% at 88% 100%, rgba(16,185,129,0.09) 0%, transparent 55%),
+    /* bottom-left: cool blue depth */
+    radial-gradient(ellipse 50% 40% at 5%  95%,  rgba(59,130,246,0.07) 0%, transparent 50%),
+    /* base: deep navy-to-near-black */
+    linear-gradient(170deg, #06101e 0%, #0a1628 35%, #080e1c 70%, #050c17 100%);
+  background-attachment: fixed;
+  background-size: cover;
   min-height: 100vh;
 }
 
@@ -26,6 +40,151 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ─── Map overlay glass ─────────────────────────────────────────────── */
+/* Floating panels / pills that sit on top of the map */
+.map-glass {
+  background: rgba(8, 14, 28, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    0 1px 0  rgba(255,255,255,0.08) inset,
+    0 -1px 0 rgba(0,0,0,0.30) inset,
+    0 8px 32px rgba(0,0,0,0.55),
+    0 2px 8px  rgba(0,0,0,0.35);
+}
+/* ─────────────────────────────────────────────────────────────────────── */
+
+/* ─── Liquid glass component system ──────────────────────────────────── */
+
+/* Main card / panel bubble */
+.glass-card {
+  background: linear-gradient(
+    145deg,
+    rgba(30, 41, 59, 0.72) 0%,
+    rgba(15, 23, 42, 0.60) 100%
+  );
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    0 1px 0   rgba(255,255,255,0.10) inset,   /* top-edge lit rim */
+    0 -1px 0  rgba(0,0,0,0.40) inset,          /* bottom-edge depth */
+    0 20px 60px rgba(0,0,0,0.55),
+    0 4px 16px rgba(0,0,0,0.35);
+  position: relative;
+  overflow: hidden;
+}
+/* diagonal sheen on the face */
+.glass-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    150deg,
+    rgba(255,255,255,0.07) 0%,
+    rgba(255,255,255,0.02) 35%,
+    transparent 55%
+  );
+  pointer-events: none;
+}
+
+/* Toggle / segmented control pill */
+.glass-toggle {
+  background: rgba(0,0,0,0.30);
+  border: 1px solid rgba(255,255,255,0.07);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35) inset;
+}
+
+/* Recessed input field */
+.glass-input {
+  background: rgba(4, 10, 22, 0.55);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.45) inset,
+    0 1px 0   rgba(255,255,255,0.04);
+}
+.glass-input:focus {
+  border-color: rgba(99,102,241,0.55);
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.45) inset,
+    0 0 0 3px rgba(99,102,241,0.18);
+  outline: none;
+}
+
+/* Primary CTA button — indigo glass */
+.glass-btn-primary {
+  background: linear-gradient(
+    135deg,
+    rgba(99,102,241,0.90) 0%,
+    rgba(79,70,229,0.95) 100%
+  );
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.20) inset,
+    0 6px 20px rgba(99,102,241,0.40),
+    0 2px 8px rgba(0,0,0,0.30);
+}
+.glass-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(
+    135deg,
+    rgba(118,120,255,0.92) 0%,
+    rgba(99,102,241,0.97) 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.22) inset,
+    0 8px 28px rgba(99,102,241,0.55),
+    0 2px 8px rgba(0,0,0,0.30);
+}
+/* ─────────────────────────────────────────────────────────────────────── */
+
+/* ─── Card depth system ────────────────────────────────────────────────── */
+/* Primary card surface (#1E293B) — glass morphism */
+[class*="bg-[#1E293B]"] {
+  background: linear-gradient(
+    145deg,
+    rgba(30, 41, 59, 0.70) 0%,
+    rgba(15, 23, 42, 0.58) 100%
+  ) !important;
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border-color: rgba(255, 255, 255, 0.09) !important;
+  box-shadow:
+    0 1px 0   rgba(255,255,255,0.09) inset,
+    0 -1px 0  rgba(0,0,0,0.35) inset,
+    0 16px 48px rgba(0,0,0,0.50),
+    0 4px 12px  rgba(0,0,0,0.30);
+  position: relative;
+}
+/* top-left diagonal sheen */
+[class*="bg-[#1E293B]"]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    148deg,
+    rgba(255,255,255,0.07) 0%,
+    rgba(255,255,255,0.02) 32%,
+    transparent 52%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Deep card surface (#0F172A) */
+[class*="bg-[#0F172A]"] {
+  background: rgba(4, 10, 22, 0.62) !important;
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  border-color: rgba(255,255,255,0.06) !important;
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.45) inset,
+    0 1px 0   rgba(255,255,255,0.04);
+}
+/* ─────────────────────────────────────────────────────────────────────── */
 
 /* Optional: nicer scrollbars */
 .custom-scroll::-webkit-scrollbar {

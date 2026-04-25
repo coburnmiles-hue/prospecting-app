@@ -3,12 +3,12 @@ import { ChevronRight, X } from "lucide-react";
 export default function ListItemButton({ onClick, isActive, title, subtitle, itemKey, onDelete, showDelete, metric, savedStatus }) {
   // savedStatus: 'saved' | 'unsaved' | undefined (no coloring for saved-view items)
   const colorClass = isActive
-    ? "bg-indigo-700 border-indigo-500 text-white"
+    ? "bg-indigo-600/40 border-indigo-500/60 text-white backdrop-blur-md"
     : savedStatus === "saved"
-    ? "bg-emerald-900/20 border-emerald-600/50 hover:border-emerald-500"
+    ? "bg-emerald-900/15 border-emerald-600/30 hover:border-emerald-500/50 backdrop-blur-md"
     : savedStatus === "unsaved"
-    ? "bg-amber-900/10 border-amber-600/30 hover:border-amber-500/60"
-    : "bg-[#1E293B] border-slate-700 hover:border-slate-500";
+    ? "bg-amber-900/10 border-amber-600/20 hover:border-amber-500/40 backdrop-blur-md"
+    : "bg-white/[0.04] border-white/[0.07] hover:border-white/[0.14] backdrop-blur-md";
 
   return (
     <button

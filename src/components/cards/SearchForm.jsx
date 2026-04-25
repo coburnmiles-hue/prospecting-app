@@ -20,7 +20,7 @@ export default function SearchForm({
     <section className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700 shadow-lg">
       <form onSubmit={onSubmit} className="space-y-4">
         {isSearchMode && (
-          <div className="flex gap-1 bg-slate-900/60 rounded-xl p-1">
+          <div className="flex gap-1 glass-toggle rounded-xl p-1">
             <button
               type="button"
               onClick={() => onSearchModeChange?.("name")}
