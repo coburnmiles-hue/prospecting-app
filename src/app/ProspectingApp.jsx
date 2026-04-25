@@ -5272,7 +5272,7 @@ export default function ProspectingApp() {
         )}
 
         {/* Right column */}
-        <section className={(viewMode === "metrics" || viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"}>
+        <section className={`${(viewMode === "metrics" || viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"} ${viewMode === "saved" ? "order-first lg:order-none" : ""}`}>
           {/* Saved sub-view tabs (always shown in saved mode) */}
           {viewMode === "saved" && (
             <div className="flex items-center gap-1.5 bg-[#1E293B] rounded-2xl border border-slate-700 p-1.5 mb-4">

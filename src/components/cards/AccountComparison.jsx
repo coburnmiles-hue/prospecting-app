@@ -98,7 +98,7 @@ export default function AccountComparison({ savedAccounts, onClose }) {
         )}
       </div>
 
-      <div className="grid lg:grid-cols-5 gap-5">
+      <div className="grid lg:grid-cols-5 gap-5 min-w-0">
         {/* Selector — 2 cols */}
         <div className="lg:col-span-2 space-y-2">
           <input
@@ -142,7 +142,7 @@ export default function AccountComparison({ savedAccounts, onClose }) {
         </div>
 
         {/* Chart — 3 cols */}
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-3 min-w-0 overflow-hidden">
           {selected.length === 0 ? (
             <div className="h-[300px] flex items-center justify-center text-slate-600 text-[11px] font-bold uppercase tracking-widest text-center leading-6">
               Select accounts<br />to compare
@@ -153,7 +153,7 @@ export default function AccountComparison({ savedAccounts, onClose }) {
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartData} margin={{ top: 5, right: 5, left: -10, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <XAxis dataKey="month" tick={{ fill: "#64748b", fontSize: 9 }} />
                 <YAxis
