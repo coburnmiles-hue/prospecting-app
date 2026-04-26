@@ -3567,28 +3567,64 @@ export default function ProspectingApp() {
   // exclusively via the Save button in the account info UI which calls
   // DELETE /api/accounts?id=... and refreshes the saved list.
 
+  // ---------- Learned food-split percentages from signed active accounts ----------
+  const learnedFoodPcts = useMemo(() => {
+    const byType = {};
+    (Array.isArray(savedAccounts) ? savedAccounts : []).forEach(acc => {
+      try {
+        const p = parseSavedNotes(acc.notes);
+        if (!p?.activeAccount || !(p?.wonGpv > 0) || !p?.venueType || !Array.isArray(p?.history) || p.history.length === 0) return;
+        const hist = p.history.filter(h => h.total > 0);
+        if (hist.length === 0) return;
+        const avgAlc = hist.reduce((s, h) => s + h.total, 0) / hist.length;
+        const foodPct = (p.wonGpv - avgAlc) / p.wonGpv;
+        if (foodPct < 0 || foodPct > 1) return;
+        if (!byType[p.venueType]) byType[p.venueType] = [];
+        byType[p.venueType].push({ foodPct, weight: hist.length });
+      } catch {}
+    });
+    const result = {};
+    Object.entries(byType).forEach(([type, samples]) => {
+      if (samples.length === 0) return;
+      const totalWeight = samples.reduce((s, x) => s + x.weight, 0);
+      const weightedFoodPct = samples.reduce((s, x) => s + x.foodPct * x.weight, 0) / totalWeight;
+      const defaultFoodPct = VENUE_TYPES[type]?.foodPct ?? 0.5;
+      // Blend default + learned; at 5+ accounts learned dominates (65% weight)
+      const trustFactor = Math.min(samples.length / 5, 1);
+      result[type] = {
+        foodPct: defaultFoodPct * (1 - trustFactor * 0.65) + weightedFoodPct * (trustFactor * 0.65),
+        learnedFoodPct: weightedFoodPct,
+        sampleCount: samples.length,
+        trustFactor,
+      };
+    });
+    return result;
+  }, [savedAccounts]);
+
   // ---------- Derived ----------
   const stats = useMemo(() => {
     if (!selectedEstablishment?.history?.length) return null;
     const h = selectedEstablishment.history;
     const filtered = h.filter((m) => m.total > 0);
     const avgAlc = filtered.length > 0 ? (filtered.reduce((sum, m) => sum + m.total, 0) / filtered.length) : 0;
-    const cfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
+    const baseCfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
+    const learned = learnedFoodPcts[venueType];
+    // If learned data exists, fully override the default split with actual observed split
+    const effectiveFoodPct = learned ? learned.learnedFoodPct : baseCfg.foodPct;
+    const cfg = { ...baseCfg, foodPct: effectiveFoodPct, alcoholPct: 1 - effectiveFoodPct };
     
     let estFood;
     if (venueType === 'custom' && customFoodPct) {
-      // Use custom food sales amount directly
       estFood = parseFloat(customFoodPct) || 0;
     } else {
       estFood = cfg.alcoholPct > 0 ? (avgAlc / cfg.alcoholPct) * cfg.foodPct : 0;
-      // For fine dining, multiply food portion by 1.75
       if (venueType === 'fine_dining') {
         estFood = estFood * 1.75;
       }
     }
     
-    return { avgAlc, estFood, total: avgAlc + estFood, cfg };
-  }, [selectedEstablishment, venueType, customFoodPct]);
+    return { avgAlc, estFood, total: avgAlc + estFood, cfg, learnedInfo: learned || null };
+  }, [selectedEstablishment, venueType, customFoodPct, learnedFoodPcts]);
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -5745,6 +5781,7 @@ export default function ProspectingApp() {
                       </div>
                     )}
                   </div>
+
                 </div>
               </div>
 
@@ -6766,6 +6803,7 @@ export default function ProspectingApp() {
                   isSaved={!!selectedEstablishment?.info?.id}
                   customFoodPct={customFoodPct}
                   onCustomFoodPctChange={(e) => setCustomFoodPct(e.target.value)}
+                  learnedInfo={stats?.learnedInfo || learnedFoodPcts[venueType] || null}
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">

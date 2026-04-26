@@ -1,7 +1,23 @@
+import { useState, useEffect } from "react";
 import { Utensils, Percent, Lock, Unlock } from "lucide-react";
 import { formatCurrency } from "../../utils/formatters";
 
-export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved, customFoodPct, onCustomFoodPctChange }) {
+export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved, customFoodPct, onCustomFoodPctChange, learnedInfo }) {
+  const [learnedUnlocked, setLearnedUnlocked] = useState(false);
+
+  // Reset to learned-locked mode whenever the account changes
+  useEffect(() => {
+    setLearnedUnlocked(false);
+  }, [learnedInfo]);
+
+  const isLearnedMode = !!learnedInfo && !learnedUnlocked;
+
+  const handleLearnedUnlock = () => {
+    if (window.confirm('This will override the learned data split and let you choose a venue template manually. Are you sure?')) {
+      setLearnedUnlocked(true);
+    }
+  };
+
   return (
     <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700 flex flex-col">
       <div className="flex items-center justify-between mb-6">
@@ -9,12 +25,20 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
           <Utensils size={16} /> Volume Adjuster
         </div>
         <div className="px-3 py-1 bg-slate-800 rounded-full border border-slate-700 text-[8px] font-black uppercase text-emerald-400 flex items-center gap-2 tracking-tighter">
-          <Percent size={10} /> {venueTypes[venueType].desc}
+          <Percent size={10} /> {isLearnedMode
+            ? Math.round(learnedInfo.learnedFoodPct * 100) + '% Food / ' + Math.round((1 - learnedInfo.learnedFoodPct) * 100) + '% Alcohol'
+            : venueTypes[venueType].desc
+          }
         </div>
       </div>
 
       <div className="flex gap-2 mb-6">
-        {isLocked ? (
+        {isLearnedMode ? (
+          <div className="flex-1 bg-[#0F172A] border border-emerald-600/40 rounded-2xl p-4 text-[10px] font-black text-emerald-300 uppercase flex items-center gap-2">
+            <span className="text-emerald-400">✦</span>
+            <span>Internal Data</span>
+          </div>
+        ) : isLocked ? (
           <div className="flex-1 bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[10px] font-black text-slate-200 uppercase flex items-center justify-between">
             <span>{venueTypes[venueType].label}</span>
           </div>
@@ -31,18 +55,18 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
             ))}
           </select>
         )}
-        
-        {isSaved && (
+
+        {(isLearnedMode || isSaved) && (
           <button
-            onClick={onToggleLock}
+            onClick={isLearnedMode ? handleLearnedUnlock : onToggleLock}
             className={`px-4 rounded-2xl transition-all border ${
-              isLocked 
-                ? 'bg-indigo-600 border-indigo-500 text-white' 
+              isLearnedMode || isLocked
+                ? 'bg-indigo-600 border-indigo-500 text-white'
                 : 'bg-[#0F172A] border-slate-700 text-slate-400 hover:text-slate-200'
             }`}
-            title={isLocked ? "Unlock to change genre" : "Lock current genre"}
+            title={isLearnedMode ? 'Unlock to override with a venue template' : isLocked ? 'Unlock to change genre' : 'Lock current genre'}
           >
-            {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+            {(isLearnedMode || isLocked) ? <Lock size={16} /> : <Unlock size={16} />}
           </button>
         )}
       </div>
@@ -79,6 +103,23 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
           {stats?.isOverride ? '—' : formatCurrency(stats?.avgAlc || 0)}
         </p>
       </div>
+
+      {learnedInfo && (
+        <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-900/20 border border-emerald-600/25">
+          <span className="text-emerald-400 text-[10px]">✦</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[8px] font-black uppercase tracking-widest text-emerald-400">
+              {learnedUnlocked ? 'Available (not applied) · ' : 'Active · '}{learnedInfo.sampleCount} signed {learnedInfo.sampleCount === 1 ? 'account' : 'accounts'}
+            </p>
+            <p className="text-[9px] font-bold text-emerald-300 mt-0.5">
+              {Math.round(learnedInfo.learnedFoodPct * 100)}% food · {Math.round((1 - learnedInfo.learnedFoodPct) * 100)}% alcohol
+              {learnedInfo.trustFactor < 1 && (
+                <span className="text-slate-500 font-normal"> ({learnedInfo.sampleCount < 5 ? `${learnedInfo.sampleCount} sample${learnedInfo.sampleCount === 1 ? '' : 's'}` : 'confident'})</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
