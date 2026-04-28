@@ -6794,6 +6794,7 @@ export default function ProspectingApp() {
               {/* Volume Adjuster + Historical Volume */}
               <div className="grid grid-cols-1 gap-6">
                 <VolumeAdjuster
+                  key={selectedEstablishment?.info?.id || selectedEstablishment?.info?.license_number || 'new'}
                   venueTypes={VENUE_TYPES}
                   venueType={venueType}
                   onVenueChange={(e) => setVenueType(e.target.value)}
@@ -6803,7 +6804,7 @@ export default function ProspectingApp() {
                   isSaved={!!selectedEstablishment?.info?.id}
                   customFoodPct={customFoodPct}
                   onCustomFoodPctChange={(e) => setCustomFoodPct(e.target.value)}
-                  learnedInfo={stats?.learnedInfo || learnedFoodPcts[venueType] || null}
+                  learnedInfo={stats?.learnedInfo || learnedFoodPcts[venueType] || Object.values(learnedFoodPcts)[0] || null}
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">
