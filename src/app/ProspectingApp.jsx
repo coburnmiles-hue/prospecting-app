@@ -4502,7 +4502,7 @@ export default function ProspectingApp() {
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
         {/* Left column */}
         {viewMode !== "metrics" && viewMode !== "map" && !(viewMode === "saved" && savedPanelMode !== "list") && (
-          <aside className="lg:col-span-4 space-y-6">
+          <aside className={`lg:col-span-4 space-y-6 ${viewMode === "saved" ? "order-first lg:order-none" : ""}`}>
             {viewMode === "saved" ? (
               <div className="space-y-3">
                 <SavedAccountsHeader
@@ -5308,7 +5308,7 @@ export default function ProspectingApp() {
         )}
 
         {/* Right column */}
-        <section className={`${(viewMode === "metrics" || viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"} ${viewMode === "saved" ? "order-first lg:order-none" : ""}`}>
+        <section className={`${(viewMode === "metrics" || viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"} ${viewMode === "saved" ? "order-last lg:order-none" : ""}`}>
           {/* Saved sub-view tabs (always shown in saved mode) */}
           {viewMode === "saved" && (
             <div className="flex items-center gap-1.5 bg-[#1E293B] rounded-2xl border border-slate-700 p-1.5 mb-4">
