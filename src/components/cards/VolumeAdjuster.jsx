@@ -46,8 +46,17 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
           <select
             className="flex-1 bg-[#0F172A] border border-slate-700 rounded-2xl p-4 text-[10px] font-black text-slate-200 uppercase outline-none cursor-pointer"
             value={venueType}
-            onChange={onVenueChange}
+            onChange={(e) => {
+              if (e.target.value === '__learned__') {
+                setLearnedUnlocked(false);
+              } else {
+                onVenueChange(e);
+              }
+            }}
           >
+            {learnedInfo && (
+              <option value="__learned__">✦ Internal Data</option>
+            )}
             {Object.entries(venueTypes).map(([k, v]) => (
               <option key={k} value={k}>
                 {v.label}
