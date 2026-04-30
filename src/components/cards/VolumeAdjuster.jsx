@@ -97,19 +97,19 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
 
       <div className="bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800 mt-auto">
         <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">
-          Est. Food Revenue {stats?.isOverride && '(Override Active)'}
+          Est. Food Revenue {(stats?.isOverride || stats?.isActualGpv) && '(N/A)'}
         </p>
         <p className="text-xl font-black text-white italic tracking-tighter">
-          {stats?.isOverride ? '—' : formatCurrency(stats?.estFood || 0)}
+          {(stats?.isOverride || stats?.isActualGpv) ? '—' : formatCurrency(stats?.estFood || 0)}
         </p>
       </div>
 
       <div className="mt-6 bg-[#0F172A]/50 p-5 rounded-2xl border border-slate-800">
         <p className="text-[9px] font-black text-emerald-300 uppercase tracking-widest mb-1">
-          Est. Alcohol Revenue {stats?.isOverride && '(Override Active)'}
+          Est. Alcohol Revenue {(stats?.isOverride || stats?.isActualGpv) && '(N/A)'}
         </p>
         <p className="text-xl font-black text-white italic tracking-tighter">
-          {stats?.isOverride ? '—' : formatCurrency(stats?.avgAlc || 0)}
+          {(stats?.isOverride || stats?.isActualGpv) ? '—' : formatCurrency(stats?.avgAlc || 0)}
         </p>
       </div>
 

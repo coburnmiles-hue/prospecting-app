@@ -3628,6 +3628,12 @@ export default function ProspectingApp() {
     const effectiveFoodPct = learned ? learned.learnedFoodPct : baseCfg.foodPct;
     const cfg = { ...baseCfg, foodPct: effectiveFoodPct, alcoholPct: 1 - effectiveFoodPct };
     
+    // If this is an active account with actual GPV entered, use it directly
+    const actualGpv = selectedActiveAccount && wonGpv ? parseFloat(wonGpv) : null;
+    if (actualGpv && actualGpv > 0) {
+      return { avgAlc, estFood: null, total: actualGpv, cfg, learnedInfo: learned || null, isActualGpv: true };
+    }
+
     let estFood;
     if (venueType === 'custom' && customFoodPct) {
       estFood = parseFloat(customFoodPct) || 0;
@@ -3638,8 +3644,8 @@ export default function ProspectingApp() {
       }
     }
     
-    return { avgAlc, estFood, total: avgAlc + estFood, cfg, learnedInfo: learned || null };
-  }, [selectedEstablishment, venueType, customFoodPct, bestLearnedInfo]);
+    return { avgAlc, estFood, total: avgAlc + estFood, cfg, learnedInfo: learned || null, isActualGpv: false };
+  }, [selectedEstablishment, venueType, customFoodPct, bestLearnedInfo, selectedActiveAccount, wonGpv]);
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -6727,7 +6733,7 @@ export default function ProspectingApp() {
                       )}
                     </div>
 
-                    <ForecastCard total={stats?.total || 0} />
+                    <ForecastCard total={stats?.total || 0} isActualGpv={stats?.isActualGpv} />
                   </div>
                 </div>
 
