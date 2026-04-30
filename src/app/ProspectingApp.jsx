@@ -3602,14 +3602,29 @@ export default function ProspectingApp() {
   }, [savedAccounts]);
 
   // ---------- Derived ----------
+  // Best learned info: type-specific first, then cross-type weighted average
+  const bestLearnedInfo = useMemo(() => {
+    if (learnedFoodPcts[venueType]) return learnedFoodPcts[venueType];
+    const values = Object.values(learnedFoodPcts);
+    if (values.length === 0) return null;
+    const totalSamples = values.reduce((s, v) => s + v.sampleCount, 0);
+    const weightedFoodPct = values.reduce((s, v) => s + v.learnedFoodPct * v.sampleCount, 0) / totalSamples;
+    return {
+      learnedFoodPct: weightedFoodPct,
+      foodPct: weightedFoodPct,
+      sampleCount: totalSamples,
+      trustFactor: Math.min(totalSamples / 5, 1),
+    };
+  }, [learnedFoodPcts, venueType]);
+
   const stats = useMemo(() => {
     if (!selectedEstablishment?.history?.length) return null;
     const h = selectedEstablishment.history;
     const filtered = h.filter((m) => m.total > 0);
     const avgAlc = filtered.length > 0 ? (filtered.reduce((sum, m) => sum + m.total, 0) / filtered.length) : 0;
     const baseCfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
-    const learned = learnedFoodPcts[venueType];
-    // If learned data exists, fully override the default split with actual observed split
+    // Use bestLearnedInfo so display and calculation always use the same split
+    const learned = bestLearnedInfo;
     const effectiveFoodPct = learned ? learned.learnedFoodPct : baseCfg.foodPct;
     const cfg = { ...baseCfg, foodPct: effectiveFoodPct, alcoholPct: 1 - effectiveFoodPct };
     
@@ -3624,7 +3639,7 @@ export default function ProspectingApp() {
     }
     
     return { avgAlc, estFood, total: avgAlc + estFood, cfg, learnedInfo: learned || null };
-  }, [selectedEstablishment, venueType, customFoodPct, learnedFoodPcts]);
+  }, [selectedEstablishment, venueType, customFoodPct, bestLearnedInfo]);
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -6804,7 +6819,7 @@ export default function ProspectingApp() {
                   isSaved={!!selectedEstablishment?.info?.id}
                   customFoodPct={customFoodPct}
                   onCustomFoodPctChange={(e) => setCustomFoodPct(e.target.value)}
-                  learnedInfo={stats?.learnedInfo || learnedFoodPcts[venueType] || Object.values(learnedFoodPcts)[0] || null}
+                  learnedInfo={bestLearnedInfo}
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">
