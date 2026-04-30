@@ -13,7 +13,6 @@ export async function GET(req) {
       return Response.json({ error: 'Google Places API key not configured' }, { status: 500 });
     }
 
-    // First, search for the place to get its place_id
     const searchQuery = `${name} ${address}`;
     const searchUrl = `https://places.googleapis.com/v1/places:searchText`;
     
@@ -45,20 +44,19 @@ export async function GET(req) {
     const place = searchData.places[0];
     const hours = place.regularOpeningHours || place.currentOpeningHours;
     
-    if (!hours) {
-      return Response.json({ hours: null, message: 'Hours not available', website: place.websiteUri || null }, { status: 200 });
-    }
-
-    // Format the hours data
-    const formattedHours = {
+    const formattedHours = hours ? {
       weekdayDescriptions: hours.weekdayDescriptions || [],
       openNow: hours.openNow,
       periods: hours.periods || []
-    };
+    } : null;
+
+    if (!formattedHours) {
+      return Response.json({ hours: null, message: 'Hours not available', website: place.websiteUri || null }, { status: 200 });
+    }
 
     return Response.json({ 
       hours: formattedHours, 
-      website: place.websiteUri || null
+      website: place.websiteUri || null,
     }, { status: 200 });
   } catch (err) {
     console.error('Place details API error:', err);

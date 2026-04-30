@@ -292,7 +292,7 @@ export default function ProspectingApp() {
   const [hoursLoading, setHoursLoading] = useState(false);
 
   // POS detection
-  const [posSystem, setPosSystem] = useState(null); // { pos: string, source: string|null }
+  const [posSystem, setPosSystem] = useState(null); // { pos: string|null, source: string|null, thirdParty: string[] }
   const [posLoading, setPosLoading] = useState(false);
 
   // Coordinate editor state
@@ -2909,48 +2909,26 @@ export default function ProspectingApp() {
 
   // Fetch business hours when selectedEstablishment changes
   useEffect(() => {
-    const runPosDetection = (name, city, website, menuUri) => {
-      if (!name) return;
+    const runPosDetection = (website) => {
       setPosLoading(true);
       setPosSystem(null);
-      
-      const params = new URLSearchParams({ name });
-      if (city) params.set('city', city);
+
+      const name = selectedEstablishment?.info?.location_name || '';
+
+      if (!website && !name) {
+        setPosSystem({ pos: null, source: null, thirdParty: [] });
+        setPosLoading(false);
+        return;
+      }
+
+      const params = new URLSearchParams();
       if (website) params.set('website', website);
-      if (menuUri) params.set('menuUrl', menuUri);
-      
-      // Add retry logic with exponential backoff
-      const maxRetries = 2;
-      let retryCount = 0;
-      
-      const attemptDetection = async () => {
-        try {
-          const response = await fetch(`/api/detect-pos?${params}`);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          const data = await response.json();
-          setPosSystem(data);
-        } catch (error) {
-          console.warn(`POS detection attempt ${retryCount + 1} failed:`, error.message);
-          
-          if (retryCount < maxRetries) {
-            retryCount++;
-            // Exponential backoff: 1s, 2s
-            const delay = Math.pow(2, retryCount - 1) * 1000;
-            setTimeout(attemptDetection, delay);
-          } else {
-            // Final fallback
-            setPosSystem({ pos: 'Unknown', source: null });
-          }
-        } finally {
-          if (retryCount === 0 || (retryCount >= maxRetries)) {
-            setPosLoading(false);
-          }
-        }
-      };
-      
-      attemptDetection();
+      if (name) params.set('name', name);
+      fetch(`/api/detect-pos?${params}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => setPosSystem(data || { pos: null, source: null, thirdParty: [] }))
+        .catch(() => setPosSystem({ pos: null, source: null, thirdParty: [] }))
+        .finally(() => setPosLoading(false));
     };
 
     const fetchHours = async () => {
@@ -2970,12 +2948,7 @@ export default function ProspectingApp() {
           setBusinessHours(hoursWithCurrentStatus);
           setBusinessWebsite(parsed.businessWebsite || null);
           setHoursLoading(false);
-          runPosDetection(
-            selectedEstablishment.info.location_name,
-            selectedEstablishment.info.location_city || '',
-            parsed.businessWebsite || null,
-            null
-          );
+          runPosDetection(parsed.businessWebsite || null);
           return;
         }
       } catch {}
@@ -2994,17 +2967,17 @@ export default function ProspectingApp() {
           const hoursWithCurrentStatus = recalculateOpenNow(data.hours);
           setBusinessHours(hoursWithCurrentStatus);
           setBusinessWebsite(data.website || null);
-          runPosDetection(name, selectedEstablishment.info.location_city || '', data.website || null, data.menuUri || null);
+          runPosDetection(data.website || null);
         } else {
           setBusinessHours(null);
           setBusinessWebsite(null);
-          runPosDetection(name, selectedEstablishment.info.location_city || '', null, null);
+          runPosDetection(null);
         }
       } catch (error) {
         console.error('Failed to fetch hours:', error);
         setBusinessHours(null);
         setBusinessWebsite(null);
-        runPosDetection(name, selectedEstablishment.info.location_city || '', null, null);
+        runPosDetection(null);
       } finally {
         setHoursLoading(false);
       }
@@ -6613,62 +6586,102 @@ export default function ProspectingApp() {
 
                     {/* POS System */}
                     {(() => {
+                      const faviconUrl = (domain) =>
+                        `https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://${domain}&size=32`;
                       const POS_LOGOS = {
-                        "Toast":          "https://www.toasttab.com/favicon.ico",
-                        "Square":         "https://squareup.com/favicon.ico",
-                        "Clover":         "https://www.clover.com/favicon.ico",
-                        "Lightspeed":     "https://www.lightspeedhq.com/favicon.ico",
-                        "Olo":            "https://www.olo.com/favicon.ico",
-                        "SpotOn":         "https://www.spoton.com/favicon.ico",
-                        "Aloha / NCR":    "https://www.ncr.com/favicon.ico",
-                        "TouchBistro":    "https://www.touchbistro.com/favicon.ico",
-                        "BentoBox":       "https://www.getbento.com/favicon.ico",
-                        "Revel":          "https://revelsystems.com/favicon.ico",
-                        "HungerRush":     "https://www.hungerrush.com/favicon.ico",
-                        "Lavu":           "https://poslavu.com/favicon.ico",
-                        "Owner.com":      "https://www.owner.com/favicon.ico",
-                        "PopMenu":        "https://popmenu.com/favicon.ico",
-                        "Flipdish":       "https://www.flipdish.com/favicon.ico",
-                        "Deliverect":     "https://www.deliverect.com/favicon.ico",
-                        "ChowNow":        "https://www.chownow.com/favicon.ico",
-                        "Menufy":         "https://www.menufy.com/favicon.ico",
-                        "Slice":          "https://www.slicelife.com/favicon.ico",
-                        "Allset":         "https://www.allsetnow.com/favicon.ico",
-                        "Zuppler":        "https://www.zuppler.com/favicon.ico",
+                        "Toast":          faviconUrl("toasttab.com"),
+                        "Square":         faviconUrl("squareup.com"),
+                        "Clover":         faviconUrl("clover.com"),
+                        "Lightspeed":     faviconUrl("lightspeedhq.com"),
+                        "Olo":            faviconUrl("olo.com"),
+                        "SpotOn":         faviconUrl("spoton.com"),
+                        "Aloha / NCR":    faviconUrl("ncrvoyix.com"),
+                        "TouchBistro":    faviconUrl("touchbistro.com"),
+                        "BentoBox":       faviconUrl("getbento.com"),
+                        "Revel":          faviconUrl("revelsystems.com"),
+                        "HungerRush":     faviconUrl("hungerrush.com"),
+                        "Lavu":           faviconUrl("poslavu.com"),
+                        "Owner.com":      faviconUrl("owner.com"),
+                        "PopMenu":        faviconUrl("popmenu.com"),
+                        "Flipdish":       faviconUrl("flipdish.com"),
+                        "ChowNow":        faviconUrl("chownow.com"),
+                        "Menufy":         faviconUrl("menufy.com"),
+                        "Slice":          faviconUrl("slicelife.com"),
+                        "Zuppler":        faviconUrl("zuppler.com"),
+                      };
+                      const TP_LOGOS = {
+                        "DoorDash":   faviconUrl("doordash.com"),
+                        "Uber Eats":  faviconUrl("ubereats.com"),
+                        "Grubhub":    faviconUrl("grubhub.com"),
+                        "Postmates":  faviconUrl("postmates.com"),
+                        "Instacart":  faviconUrl("instacart.com"),
+                        "EzCater":    faviconUrl("ezcater.com"),
+                        "Caviar":     faviconUrl("trycaviar.com"),
+                        "Seamless":   faviconUrl("seamless.com"),
                       };
                       const logoUrl = posSystem?.pos ? POS_LOGOS[posSystem.pos] : null;
                       return (
-                        <div className="mt-4">
-                          <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
-                            POS System
-                          </div>
-                          {posLoading ? (
-                            <span className="text-[11px] text-slate-500 font-medium italic">Detecting...</span>
-                          ) : posSystem ? (
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
-                                posSystem.pos === 'Unknown'
-                                  ? 'bg-slate-700/50 text-slate-400 border border-slate-600'
-                                  : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                              }`}>
-                                {logoUrl && (
-                                  <img
-                                    src={logoUrl}
-                                    alt=""
-                                    width={14}
-                                    height={14}
-                                    className="rounded-sm object-contain"
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                  />
-                                )}
-                                {posSystem.pos}
-                              </span>
-                              {posSystem.source && posSystem.pos !== 'Unknown' && (
-                                <span className="text-[9px] text-slate-500 font-medium">via {posSystem.source}</span>
-                              )}
+                        <>
+                          <div className="mt-4">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                              POS System
                             </div>
-                          ) : null}
-                        </div>
+                            {posLoading ? (
+                              <span className="text-[11px] text-slate-500 font-medium italic">Detecting...</span>
+                            ) : posSystem?.pos ? (
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                  {logoUrl && (
+                                    <img
+                                      src={logoUrl}
+                                      alt=""
+                                      width={14}
+                                      height={14}
+                                      className="rounded-sm object-contain"
+                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                  )}
+                                  {posSystem.pos}
+                                </span>
+                                {posSystem.source && (
+                                  <span className="text-[9px] text-slate-500 font-medium">via {posSystem.source}</span>
+                                )}
+                              </div>
+                            ) : posSystem ? (
+                              <span className="text-[11px] text-slate-500 font-medium italic">Not detected</span>
+                            ) : null}
+                          </div>
+
+                          {/* 3rd Party Ordering */}
+                          <div className="mt-4">
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                              3rd Party Ordering
+                            </div>
+                            {posLoading ? (
+                              <span className="text-[11px] text-slate-500 font-medium italic">Detecting...</span>
+                            ) : posSystem?.thirdParty?.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {posSystem.thirdParty.map(tp => (
+                                  <span key={tp} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                                    {TP_LOGOS[tp] && (
+                                      <img
+                                        src={TP_LOGOS[tp]}
+                                        alt=""
+                                        width={14}
+                                        height={14}
+                                        className="rounded-sm object-contain"
+                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                      />
+                                    )}
+                                    {tp}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : posSystem ? (
+                              <span className="text-[11px] text-slate-500 font-medium italic">None detected</span>
+                            ) : null}
+                          </div>
+                        </>
                       );
                     })()}
 
@@ -6960,7 +6973,7 @@ export default function ProspectingApp() {
               )}
             </div>
           )}
-          {viewMode !== "map" && !selectedEstablishment && (
+          {viewMode !== "map" && viewMode !== "metrics" && !selectedEstablishment && (
             <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
               {viewMode === "top" && topViewMode === "map" ? (
                 <>
