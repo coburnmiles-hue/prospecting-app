@@ -381,11 +381,13 @@ export default function PersonalMetrics({ data, onActivityClick, calculatedMetri
               ? (calculatedMetrics.allTime?.totalArr || 0)
               : (calculatedMetrics.totalArr || 0);
             const displayYear1Earnings = Math.round(displayTotalArr * 0.265);
+            const displayYearlyResiduals = Math.round(displayTotalArr * 0.15);
             
             const chartData = [
               { name: isMobile ? "GPV" : "Total GPV", value: displayTotalGpv, fill: "#10b981" },
               { name: isMobile ? "ARR" : "Total ARR", value: displayTotalArr, fill: "#6366f1" },
               { name: isMobile ? "Y1" : "Year 1 Earnings", value: displayYear1Earnings, fill: "#a855f7" },
+              { name: isMobile ? "Residuals" : "Yearly Residuals", value: displayYearlyResiduals, fill: "#f59e0b" },
             ];
             
             const formatCurrency = (value) => {

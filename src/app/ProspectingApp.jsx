@@ -2405,14 +2405,15 @@ export default function ProspectingApp() {
       // If 'show active opp only' is enabled, skip any non-active-opp pins
       if (showActiveOnly && !parsed?.activeOpp) return;
 
-      // If 'show referral only' is enabled, skip any non-referral pins
-      if (showReferralOnly && !parsed?.referral) return;
-
-      // If 'show hot lead only' is enabled, skip any non-hot-lead pins
-      if (showHotLeadOnly && !parsed?.hotLead) return;
-
-      // If 'show strategic only' is enabled, skip any non-strategic pins
-      if (showStrategicOnly && !parsed?.strategic) return;
+      // Tag filters are OR logic: show pin if it matches ANY active tag filter
+      const anyTagFilterActive = showReferralOnly || showHotLeadOnly || showStrategicOnly;
+      if (anyTagFilterActive) {
+        const matchesTag =
+          (showReferralOnly && !!parsed?.referral) ||
+          (showHotLeadOnly && !!parsed?.hotLead) ||
+          (showStrategicOnly && !!parsed?.strategic);
+        if (!matchesTag) return;
+      }
 
       // If 'show closed lost only' is enabled, skip any non-closed-lost pins
       if (showClosedLostOnly && !parsed?.closedLost) return;
@@ -3740,7 +3741,7 @@ export default function ProspectingApp() {
       list = list.filter((a) => {
         try {
           const p = parseSavedNotes(a.notes);
-          return [...savedFlagFilters].every((flag) => !!p?.[flag]);
+          return [...savedFlagFilters].some((flag) => !!p?.[flag]);
         } catch { return false; }
       });
     }
