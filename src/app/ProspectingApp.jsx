@@ -25,6 +25,8 @@ import {
   Loader2,
   Map as MapIcon,
   MapPin,
+  Mic,
+  MoreHorizontal,
   Navigation,
   Search,
   Trophy,
@@ -60,6 +62,7 @@ import PipelineBoard from "../components/cards/PipelineBoard";
 import VisitAlertsPanel from "../components/cards/VisitAlertsPanel";
 import TrendAlertsPanel from "../components/cards/TrendAlertsPanel";
 import AccountComparison from "../components/cards/AccountComparison";
+import VoiceAgent from "../components/VoiceAgent";
 
 // Utils and Constants
 import { 
@@ -130,8 +133,11 @@ export default function ProspectingApp() {
     }
   };
 
-  const [viewMode, setViewMode] = useState("saved"); // search | top | saved | metrics | map | nro
+  const [viewMode, setViewMode] = useState("agent"); // search | top | saved | metrics | map | nro | agent
   const [savedSubView, setSavedSubView] = useState("list"); // list | info
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [moreButtonRect, setMoreButtonRect] = useState(null);
+  const moreButtonRef = useRef(null);
 
   // Custom hooks for data fetching
   const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
@@ -292,7 +298,7 @@ export default function ProspectingApp() {
   const [hoursLoading, setHoursLoading] = useState(false);
 
   // POS detection
-  const [posSystem, setPosSystem] = useState(null); // { pos: string|null, source: string|null, thirdParty: string[] }
+  const [posSystem, setPosSystem] = useState(null); // { pos: string|null, source: string|null, sourceUrl: string|null, thirdParty: string[] }
   const [posLoading, setPosLoading] = useState(false);
 
   // Coordinate editor state
@@ -2915,6 +2921,7 @@ export default function ProspectingApp() {
       setPosSystem(null);
 
       const name = selectedEstablishment?.info?.location_name || '';
+      const address = selectedEstablishment?.info?.location_address || '';
 
       if (!website && !name) {
         setPosSystem({ pos: null, source: null, thirdParty: [] });
@@ -2925,6 +2932,7 @@ export default function ProspectingApp() {
       const params = new URLSearchParams();
       if (website) params.set('website', website);
       if (name) params.set('name', name);
+      if (address) params.set('address', address);
       fetch(`/api/detect-pos?${params}`)
         .then(r => r.ok ? r.json() : null)
         .then(data => setPosSystem(data || { pos: null, source: null, thirdParty: [] }))
@@ -4493,7 +4501,15 @@ export default function ProspectingApp() {
         </button>
       </header>
 
+      {/* AI Activity Logger full-page view */}
+      {viewMode === "agent" && (
+        <main className="flex flex-col items-center justify-start min-h-0 pb-32">
+          <VoiceAgent savedAccounts={savedAccounts} refreshSavedAccounts={refreshSavedAccounts} inline={true} />
+        </main>
+      )}
+
       {/* Main */}
+      {viewMode !== "agent" && (
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
         {/* Left column */}
         {viewMode !== "metrics" && viewMode !== "map" && !(viewMode === "saved" && savedPanelMode !== "list") && (
@@ -6645,7 +6661,18 @@ export default function ProspectingApp() {
                                   {posSystem.pos}
                                 </span>
                                 {posSystem.source && (
-                                  <span className="text-[9px] text-slate-500 font-medium">via {posSystem.source}</span>
+                                  posSystem.sourceUrl ? (
+                                    <a
+                                      href={posSystem.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[9px] text-indigo-400 font-medium hover:text-indigo-300 hover:underline transition-colors"
+                                    >
+                                      via {posSystem.source}
+                                    </a>
+                                  ) : (
+                                    <span className="text-[9px] text-slate-500 font-medium">via {posSystem.source}</span>
+                                  )
                                 )}
                               </div>
                             ) : posSystem ? (
@@ -6997,6 +7024,7 @@ export default function ProspectingApp() {
           )}
         </section>
       </main>
+      )}
 
       {/* Fixed Bottom Navigation Dock */}
       <nav className="fixed bottom-0 left-0 right-0 z-[9999] pb-safe pointer-events-none">
@@ -7008,6 +7036,7 @@ export default function ProspectingApp() {
                 setSavedSubView("list");
                 setSelectedEstablishment(null);
                 setAiResponse("");
+                setMoreMenuOpen(false);
               }}
               className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "search" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
@@ -7017,27 +7046,29 @@ export default function ProspectingApp() {
 
             <button
               onClick={() => {
-                setViewMode("top");
-                setSavedSubView("list");
-                setSelectedEstablishment(null);
-                setAiResponse("");
-              }}
-              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "top" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
-            >
-              <Trophy size={18} className="mb-1" />
-              <span>Leaders</span>
-            </button>
-
-            <button
-              onClick={() => {
                 setViewMode("saved");
                 setSelectedEstablishment(null);
                 setAiResponse("");
+                setMoreMenuOpen(false);
               }}
               className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "saved" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
               <Bookmark size={18} className="mb-1" />
               <span>Saved</span>
+            </button>
+
+            {/* ── AI Logger dock button (center) ── */}
+            <button
+              onClick={() => {
+                setViewMode("agent");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+                setMoreMenuOpen(false);
+              }}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "agent" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
+            >
+              <Mic size={18} className="mb-1" />
+              <span>Log</span>
             </button>
 
             <button
@@ -7046,6 +7077,7 @@ export default function ProspectingApp() {
                 setSavedSubView("list");
                 setSelectedEstablishment(null);
                 setAiResponse("");
+                setMoreMenuOpen(false);
               }}
               className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "metrics" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
@@ -7053,39 +7085,92 @@ export default function ProspectingApp() {
               <span>Data</span>
             </button>
 
+            {/* ── More menu button ── */}
+            <div className="relative flex-1">
+              <button
+                ref={moreButtonRef}
+                onClick={() => {
+                  const rect = moreButtonRef.current?.getBoundingClientRect();
+                  setMoreButtonRect(rect || null);
+                  setMoreMenuOpen(o => !o);
+                }}
+                className={`dock-item w-full flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${["top","nro","map"].includes(viewMode) ? "dock-item-active text-white" : (moreMenuOpen ? "text-white" : "text-slate-400 hover:text-white")}`}
+              >
+                <div className="relative">
+                  <MoreHorizontal size={18} className="mb-1" />
+                  {territoryUnacknowledgedCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">
+                      {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
+                    </span>
+                  )}
+                </div>
+                <span>More</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* More popup menu — rendered outside nav to avoid backdrop-filter stacking context */}
+      {moreMenuOpen && (
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setMoreMenuOpen(false)} />
+          <div
+            className="fixed z-[9999] bg-[#0f172a] border border-slate-700/60 rounded-2xl shadow-2xl p-2 flex flex-col gap-1 min-w-[160px]"
+            style={{
+              boxShadow: "0 -8px 32px rgba(0,0,0,0.5)",
+              bottom: moreButtonRect ? `${window.innerHeight - moreButtonRect.top + 8}px` : "5rem",
+              left: moreButtonRect ? `${moreButtonRect.left + moreButtonRect.width / 2}px` : "auto",
+              transform: "translateX(-50%)",
+            }}
+          >
+            <button
+              onClick={() => {
+                setViewMode("top");
+                setSavedSubView("list");
+                setSelectedEstablishment(null);
+                setAiResponse("");
+                setMoreMenuOpen(false);
+              }}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all w-full text-left ${viewMode === "top" ? "bg-indigo-500/20 text-indigo-300" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}
+            >
+              <Trophy size={16} />
+              <span>Leaders</span>
+            </button>
             <button
               onClick={() => {
                 setViewMode("nro");
                 setSavedSubView("list");
                 setSelectedEstablishment(null);
                 setAiResponse("");
+                setMoreMenuOpen(false);
               }}
-              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "nro" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all w-full text-left ${viewMode === "nro" ? "bg-indigo-500/20 text-indigo-300" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}
             >
               <div className="relative">
-                <Sparkles size={18} className="mb-1" />
+                <Sparkles size={16} />
                 {territoryUnacknowledgedCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-orange-500 rounded-full text-[7px] font-black text-white flex items-center justify-center">
                     {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
                   </span>
                 )}
               </div>
               <span>NRO</span>
             </button>
-
             <button
               onClick={() => {
                 setViewMode("map");
                 setSelectedEstablishment(null);
+                setMoreMenuOpen(false);
               }}
-              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "map" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all w-full text-left ${viewMode === "map" ? "bg-indigo-500/20 text-indigo-300" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}
             >
-              <MapIcon size={18} className="mb-1" />
+              <MapIcon size={16} />
               <span>Map</span>
             </button>
           </div>
-        </div>
-      </nav>
+        </>
+      )}
 
       {/* Small CSS helpers */}
       <style>{`
