@@ -43,44 +43,38 @@ function fuzzyMatch(query, accounts) {
   return bestScore >= 20 ? best : null;
 }
 
-// When inline=true, renders as a full page panel (no floating button / modal chrome).
-// When inline=false (default), renders as a floating mic FAB + modal sheet.
+// Convert a Blob to a base64 string (data portion only)
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 export default function VoiceAgent({ savedAccounts, refreshSavedAccounts, inline = false }) {
   const [open, setOpen] = useState(false);
-  const [listening, setListening] = useState(false);
+  const [listening, setListening] = useState(false);   // recording in progress
+  const [transcribing, setTranscribing] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [inputText, setInputText] = useState("");
   const [processing, setProcessing] = useState(false);
-  const [parsed, setParsed] = useState(null);       // { accountName, activityType, noteText, followUpDate }
+  const [parsed, setParsed] = useState(null);
   const [matchedAccount, setMatchedAccount] = useState(null);
   const [overrideAccount, setOverrideAccount] = useState(null);
   const [logging, setLogging] = useState(false);
-  const [result, setResult] = useState(null);        // "success" | "error"
+  const [result, setResult] = useState(null);
   const [resultMsg, setResultMsg] = useState("");
   const [voiceSupported, setVoiceSupported] = useState(true);
+  const [micError, setMicError] = useState("");
 
-  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
   const inputRef = useRef(null);
 
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { setVoiceSupported(false); return; }
-
-    const rec = new SpeechRecognition();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-
-    rec.onresult = (e) => {
-      const t = Array.from(e.results).map(r => r[0].transcript).join(" ");
-      setTranscript(t);
-      setInputText(t);
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    recognitionRef.current = rec;
-
-    return () => { rec.abort(); };
+    setVoiceSupported(!!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder));
   }, []);
 
   const reset = useCallback(() => {
@@ -93,18 +87,93 @@ export default function VoiceAgent({ savedAccounts, refreshSavedAccounts, inline
     setResultMsg("");
     setProcessing(false);
     setLogging(false);
+    setMicError("");
+    setTranscribing(false);
   }, []);
 
   const handleOpen = () => { reset(); setOpen(true); setTimeout(() => inputRef.current?.focus(), 100); };
-  const handleClose = () => { recognitionRef.current?.abort(); setListening(false); setOpen(false); reset(); };
+  const handleClose = () => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setListening(false);
+    setOpen(false);
+    reset();
+  };
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
+    // Stop recording
     if (listening) {
-      recognitionRef.current?.stop();
-    } else {
-      setTranscript("");
-      setInputText("");
-      try { recognitionRef.current?.start(); setListening(true); } catch {}
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    setMicError("");
+    setTranscript("");
+    setInputText("");
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Pick the best supported mime type
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]
+        .find(t => MediaRecorder.isTypeSupported(t)) || "";
+
+      chunksRef.current = [];
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setListening(false);
+
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType });
+        if (blob.size < 500) {
+          setMicError("Recording was too short. Tap the mic, speak your command, then tap again.");
+          return;
+        }
+
+        setTranscribing(true);
+        try {
+          const base64 = await blobToBase64(blob);
+          const baseMime = rec.mimeType.split(";")[0] || "audio/webm";
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ audioBase64: base64, mimeType: baseMime }),
+            credentials: "include",
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Transcription failed");
+          if (!data.transcript) throw new Error("No speech detected — try speaking louder or closer to the mic.");
+          setTranscript(data.transcript);
+          setInputText(data.transcript);
+        } catch (err) {
+          setMicError(err.message || "Could not transcribe audio. Please type your command instead.");
+        } finally {
+          setTranscribing(false);
+        }
+      };
+
+      rec.onerror = () => {
+        stream.getTracks().forEach(t => t.stop());
+        setListening(false);
+        setMicError("Recording failed. Please try again.");
+      };
+
+      mediaRecorderRef.current = rec;
+      rec.start();
+      setListening(true);
+    } catch (err) {
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setMicError("Microphone access was denied. Please allow mic access in your browser/device settings, then try again.");
+      } else if (err.name === "NotFoundError") {
+        setMicError("No microphone found. Check that your device has a mic available.");
+      } else {
+        setMicError("Could not start recording: " + (err.message || err.name));
+      }
     }
   };
 
@@ -193,13 +262,16 @@ export default function VoiceAgent({ savedAccounts, refreshSavedAccounts, inline
           {voiceSupported && (
             <button
               onClick={toggleListening}
+              disabled={transcribing}
               className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
-                listening
+                transcribing
+                  ? "bg-slate-800 border border-slate-600/60 text-slate-600 cursor-not-allowed"
+                  : listening
                   ? "bg-rose-500/20 border border-rose-500/40 text-rose-400 animate-pulse"
                   : "bg-slate-800 border border-slate-600/60 text-slate-400 hover:text-white hover:border-indigo-500/60"
               }`}
             >
-              {listening ? <MicOff size={16} /> : <Mic size={16} />}
+              {transcribing ? <Loader2 size={16} className="animate-spin" /> : listening ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
           )}
           <button
@@ -212,11 +284,27 @@ export default function VoiceAgent({ savedAccounts, refreshSavedAccounts, inline
         </div>
       )}
 
-      {/* Listening indicator */}
+      {/* Mic error */}
+      {micError && (
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] font-medium">
+          <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+          <span>{micError}</span>
+        </div>
+      )}
+
+      {/* Recording indicator */}
       {listening && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20">
           <div className="w-2 h-2 rounded-full bg-rose-400 animate-ping flex-shrink-0" />
-          <span className="text-rose-300 text-[11px] font-bold">{transcript || "Listening…"}</span>
+          <span className="text-rose-300 text-[11px] font-bold">Recording… tap mic to stop</span>
+        </div>
+      )}
+
+      {/* Transcribing indicator */}
+      {transcribing && (
+        <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+          <Loader2 size={13} className="text-indigo-400 animate-spin flex-shrink-0" />
+          <span className="text-indigo-300 text-[11px] font-bold">Transcribing…</span>
         </div>
       )}
 
@@ -352,8 +440,9 @@ export default function VoiceAgent({ savedAccounts, refreshSavedAccounts, inline
           <div className="flex flex-col items-center gap-4 mb-6">
             <button
               onClick={toggleListening}
+              disabled={transcribing}
               className={`w-20 h-20 rounded-full flex items-center justify-center shadow-2xl transition-all active:scale-95 ${
-                listening ? "animate-pulse" : ""
+                transcribing ? "opacity-50 cursor-not-allowed" : listening ? "animate-pulse" : ""
               }`}
               style={{
                 background: listening
@@ -364,19 +453,23 @@ export default function VoiceAgent({ savedAccounts, refreshSavedAccounts, inline
                   : "0 8px 40px rgba(99,102,241,0.5)",
               }}
             >
-              {listening ? <MicOff size={32} className="text-white" /> : <Mic size={32} className="text-white" />}
+              {transcribing
+                ? <Loader2 size={32} className="text-white animate-spin" />
+                : listening ? <MicOff size={32} className="text-white" />
+                : <Mic size={32} className="text-white" />}
             </button>
             <div className="text-center">
               <div className="text-white font-black text-lg tracking-tight">
-                {listening ? "Listening…" : "Tap to speak"}
+                {transcribing ? "Transcribing…" : listening ? "Recording… tap to stop" : "Tap to speak"}
               </div>
               <div className="text-slate-500 text-[11px] font-bold uppercase tracking-widest mt-0.5">
-                or type your command below
+                {listening ? "tap the mic again when done" : "or type your command below"}
               </div>
             </div>
-            {listening && transcript && (
-              <div className="w-full px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[13px] text-center font-medium">
-                {transcript}
+            {micError && (
+              <div className="w-full flex items-start gap-2 px-4 py-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[12px] font-medium">
+                <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                <span>{micError}</span>
               </div>
             )}
           </div>
