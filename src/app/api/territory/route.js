@@ -1,8 +1,9 @@
 import { neon } from "@neondatabase/serverless";
 import { getUserIdFromRequest } from "@/lib/auth";
 
-const TABC_URL = "https://data.texas.gov/resource/7hf9-qc9f.json";
-const LICENSE_TYPES = ["BE", "BG", "MB", "N", "NB", "NE", "BW"];
+const TABC_APPROVED_URL = "https://data.texas.gov/resource/7hf9-qc9f.json";
+const TABC_PENDING_URL  = "https://data.texas.gov/resource/mxm5-tdpj.json";
+const LICENSE_TYPES = ["ME", "FB", "BG"];
 
 async function ensureTable(sql) {
   await sql`
@@ -19,7 +20,8 @@ async function ensureTable(sql) {
   `;
 }
 
-async function searchZips(zipCodes) {
+// Query the approved (issued) licenses dataset
+async function searchApproved(zipCodes) {
   if (!zipCodes || zipCodes.length === 0) return [];
 
   const thirtyDaysAgo = new Date();
@@ -32,22 +34,74 @@ async function searchZips(zipCodes) {
   const query = `?$where=${encodeURIComponent(where)}&$order=original_issue_date DESC&$limit=500`;
 
   try {
-    const res = await fetch(`${TABC_URL}${query}`);
+    const res = await fetch(`${TABC_APPROVED_URL}${query}`);
     if (!res.ok) return [];
     const data = await res.json();
     return (Array.isArray(data) ? data : []).map((item) => ({
-      id: item.license_id || `${item.trade_name || "unknown"}-${item.zip || ""}`,
+      id: `approved-${item.license_id || `${item.trade_name || "unknown"}-${item.zip || ""}`}`,
       name: item.trade_name || "Unknown",
       address: item.address || "",
       city: item.city || "",
-      zip: item.zip || "",
+      zip: (item.zip || "").substring(0, 5),
       license_type: item.license_type || "",
       issue_date: item.original_issue_date || "",
-      source: "TABC License",
+      status: "Approved",
+      source: "TABC Approved License",
     }));
   } catch {
     return [];
   }
+}
+
+// Query the pending applications dataset
+// Note: pending zips are stored as 9-digit zip+4 (e.g. "782607874"), so we use starts_with()
+async function searchPending(zipCodes) {
+  if (!zipCodes || zipCodes.length === 0) return [];
+
+  const licenseFilter = LICENSE_TYPES.map((t) => `license_type='${t}'`).join(" OR ");
+  // Use starts_with for each 5-digit zip since pending zips may be 9-digit zip+4
+  const zipFilter = zipCodes.map((z) => `starts_with(zip, '${z}')`).join(" OR ");
+  const where = `(${zipFilter}) AND (${licenseFilter})`;
+  const query = `?$where=${encodeURIComponent(where)}&$order=submission_date DESC&$limit=500`;
+
+  try {
+    const res = await fetch(`${TABC_PENDING_URL}${query}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).map((item) => ({
+      id: `pending-${item.applicationid || `${item.trade_name || item.owner || "unknown"}-${item.zip || ""}`}`,
+      name: item.trade_name || item.owner || "Unknown",
+      address: item.address || "",
+      city: item.city || "",
+      zip: (item.zip || "").substring(0, 5),
+      license_type: item.license_type || "",
+      issue_date: item.submission_date || "",
+      status: item.applicationstatus || "Pending",
+      source: "TABC Pending Application",
+      application_id: item.applicationid || "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Fetch both approved and pending, merge and deduplicate by name+address
+async function searchZips(zipCodes) {
+  const [approved, pending] = await Promise.all([
+    searchApproved(zipCodes),
+    searchPending(zipCodes),
+  ]);
+
+  const all = [...pending, ...approved]; // pending first — higher prospecting value
+
+  // Deduplicate: same name + address combo (case-insensitive)
+  const seen = new Set();
+  return all.filter((item) => {
+    const key = `${(item.name || "").toLowerCase().trim()}|${(item.address || "").toLowerCase().trim()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // GET — return territory config, results, acknowledged ids

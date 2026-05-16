@@ -4,13 +4,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { MapPin, RefreshCw, Plus, X, CheckCircle, AlertTriangle, Loader2, Clock, ChevronDown } from "lucide-react";
 
 const LICENSE_TYPE_LABELS = {
-  BE: "Beer/Wine – Eating Place",
+  ME: "Mixed Beverage – Eating Place",
+  FB: "Food & Beverage Certificate",
   BG: "Beer/Wine – Retailer",
-  MB: "Mixed Beverage",
-  N: "Non-Profit",
-  NB: "Non-Profit Beer",
-  NE: "Non-Profit Eating",
-  BW: "Beer/Wine",
 };
 
 function shouldAutoSearch(lastSearchedAt) {
@@ -364,14 +360,16 @@ export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnackn
 }
 
 function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount }) {
-  const borderColor = saved ? "border-emerald-500/40" : acknowledged ? "border-slate-700/50" : "border-amber-500/40";
-  const bgColor = saved ? "bg-emerald-900/10" : acknowledged ? "bg-slate-900/40" : "bg-amber-900/10";
+  const isPending = result.source === "TABC Pending Application";
+  const borderColor = saved ? "border-emerald-500/40" : acknowledged ? "border-slate-700/50" : isPending ? "border-violet-500/40" : "border-amber-500/40";
+  const bgColor = saved ? "bg-emerald-900/10" : acknowledged ? "bg-slate-900/40" : isPending ? "bg-violet-900/10" : "bg-amber-900/10";
   const badge = saved
     ? { label: "Saved", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" }
     : acknowledged
     ? { label: "Reviewed", color: "bg-slate-700/50 text-slate-500 border-slate-600/30" }
     : { label: "New", color: "bg-amber-500/20 text-amber-400 border-amber-500/30" };
 
+  const dateLabel = isPending ? "Applied" : "Issued";
   const issueDate = result.issue_date
     ? new Date(result.issue_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;
@@ -390,6 +388,11 @@ function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount 
             <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border ${badge.color}`}>
               {badge.label}
             </span>
+            {isPending && (
+              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border bg-violet-500/20 text-violet-300 border-violet-500/30">
+                Pending
+              </span>
+            )}
           </div>
           {result.address && (
             <p className="text-slate-400 text-[10px] mt-0.5 truncate">
@@ -404,7 +407,12 @@ function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount 
             )}
             {issueDate && (
               <span className="text-[10px] text-slate-500">
-                Issued {issueDate}
+                {dateLabel} {issueDate}
+              </span>
+            )}
+            {isPending && result.status && result.status !== "Pending" && (
+              <span className="text-[10px] text-violet-400 font-semibold truncate">
+                {result.status}
               </span>
             )}
           </div>
