@@ -4016,6 +4016,7 @@ export default function ProspectingApp() {
         const location_number = m[2];
 
         analyze({
+          id: data.id,
           taxpayer_number,
           location_number,
           location_name: data.name,

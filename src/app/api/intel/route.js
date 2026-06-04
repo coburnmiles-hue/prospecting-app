@@ -32,7 +32,7 @@ Do not include any preamble or closing. Start directly with "OWNERS:" and provid
 
     // Helper: call Gemini with retry/backoff
     const callGeminiWithRetry = async (payload, retries = 4, delay = 800) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
       try {
         const resp = await fetch(url, {
           method: "POST",
