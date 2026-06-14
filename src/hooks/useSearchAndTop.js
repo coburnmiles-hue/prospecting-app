@@ -59,17 +59,39 @@ export function useSearch() {
         }
       }
 
-      // Sort: direct name matches first, then stripped/fuzzy matches
-      const norm = (str) => (str || '').toUpperCase().replace(/['’\-\s]/g, '');
+      // If no results from name search, retry with broad any-word fallback
+      if (unique.length === 0 && searchMode !== 'address') {
+        const broadWhere = buildSocrataWhere(s, c, true);
+        const broadQuery = `?$where=${encodeURIComponent(broadWhere)}&$order=${encodeURIComponent(
+          `${DATE_FIELD} DESC`
+        )}&$limit=100`;
+        const broadRes = await fetch(`${BASE_URL}${broadQuery}`);
+        if (broadRes.ok) {
+          const broadData = await broadRes.json();
+          for (const item of Array.isArray(broadData) ? broadData : []) {
+            const key = `${item.taxpayer_number}-${item.location_number}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              unique.push(item);
+            }
+          }
+        }
+      }
+
+      // Sort by relevance: exact phrase > stripped phrase > all-words > broad
+      const norm = (str) => (str || '').toUpperCase().replace(/['\u2019\-&.\s]/g, '');
       const sNorm = norm(s);
+      const sWords = sNorm.split(/\s+/).filter(w => w.length > 1);
       unique.sort((a, b) => {
-        const aDirect = (a.location_name || '').toUpperCase().includes(s) ? 0 : 1;
-        const bDirect = (b.location_name || '').toUpperCase().includes(s) ? 0 : 1;
-        if (aDirect !== bDirect) return aDirect - bDirect;
-        // Secondary: normalized name contains normalized search
-        const aNorm = norm(a.location_name || '').includes(sNorm) ? 0 : 1;
-        const bNorm = norm(b.location_name || '').includes(sNorm) ? 0 : 1;
-        return aNorm - bNorm;
+        const score = (item) => {
+          const name = (item.location_name || '').toUpperCase();
+          const nameN = norm(name);
+          if (name.includes(s)) return 0;                              // exact phrase
+          if (nameN.includes(sNorm)) return 1;                        // stripped exact phrase
+          if (sWords.length > 1 && sWords.every(w => nameN.includes(w))) return 2; // all words
+          return 3;                                                    // partial / broad match
+        };
+        return score(a) - score(b);
       });
 
       setResults(unique);

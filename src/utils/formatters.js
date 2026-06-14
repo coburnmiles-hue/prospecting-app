@@ -117,24 +117,59 @@ export function normalizeAddressSearch(input) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
-export function buildSocrataWhere(searchTerm, cityFilter) {
+export function buildSocrataWhere(searchTerm, cityFilter, broadMode = false) {
   const parts = [];
   if (searchTerm) {
-    // Strip apostrophes and hyphens from the search term so it can match DB entries
-    // that have them (e.g. user types "JULIOS" → also matches "JULIO'S" in the DB)
-    const stripped = searchTerm.replace(/['’\-]/g, '');
-    parts.push(
-      `(upper(location_name) like '%${searchTerm}%'` +
-      ` OR upper(taxpayer_name) like '%${searchTerm}%'` +
-      ` OR upper(location_address) like '%${searchTerm}%'` +
-      // These two clauses strip apostrophes+hyphens from the DB field before comparing,
-      // so a search for JULIOS will match a DB entry named JULIO'S
-      ` OR replace(replace(upper(location_name), '''', ''), '-', '') like '%${stripped}%'` +
-      ` OR replace(replace(upper(taxpayer_name), '''', ''), '-', '') like '%${stripped}%')`,
-    );
+    // Escape single quotes for SoQL safety
+    const s = searchTerm.replace(/'/g, "''").trim();
+    // Strip special chars for normalized matching
+    const stripped = s.replace(/['\u2019\-&.,#]/g, '');
+
+    // DB-side stripping functions (strip apostrophes, hyphens, ampersands, periods)
+    const nameStripped = `replace(replace(replace(replace(upper(location_name), '''', ''), '-', ''), '&', ''), '.', '')`;
+    const taxpayerStripped = `replace(replace(replace(replace(upper(taxpayer_name), '''', ''), '-', ''), '&', ''), '.', '')`;
+
+    // Tokenize into meaningful words (ignore 1-char tokens)
+    const words = stripped.split(/\s+/).filter(w => w.length > 1);
+
+    if (broadMode) {
+      // Broad fallback: any word matches location_name or taxpayer_name
+      const wordClauses = words.flatMap(w => [
+        `${nameStripped} like '%${w}%'`,
+        `${taxpayerStripped} like '%${w}%'`,
+      ]);
+      if (wordClauses.length > 0) {
+        parts.push(`(${wordClauses.join(' OR ')})`);
+      }
+    } else {
+      const clauses = [];
+
+      // 1. Exact phrase match
+      clauses.push(`upper(location_name) like '%${s}%'`);
+      clauses.push(`upper(taxpayer_name) like '%${s}%'`);
+
+      // 2. Stripped exact phrase (handles apostrophes, hyphens, &, . in DB entries)
+      if (stripped !== s) {
+        clauses.push(`${nameStripped} like '%${stripped}%'`);
+        clauses.push(`${taxpayerStripped} like '%${stripped}%'`);
+      }
+
+      // 3. All words AND -- each word must appear somewhere in the name.
+      //    e.g. "JOES BAR GRILL" matches "JOE'S BAR & GRILL" or "THE BAR GRILL BY JOE"
+      if (words.length > 1) {
+        const allWordsName = words.map(w => `${nameStripped} like '%${w}%'`).join(' AND ');
+        clauses.push(`(${allWordsName})`);
+        const allWordsTaxpayer = words.map(w => `${taxpayerStripped} like '%${w}%'`).join(' AND ');
+        clauses.push(`(${allWordsTaxpayer})`);
+      }
+
+      parts.push(`(${clauses.join(' OR ')})`);
+    }
   }
+
   if (cityFilter) {
-    parts.push(`upper(location_city) = '${cityFilter}'`);
+    const c = cityFilter.replace(/'/g, "''");
+    parts.push(`upper(location_city) = '${c}'`);
   }
   return parts.length > 0 ? parts.join(" AND ") : "1=1";
 }
