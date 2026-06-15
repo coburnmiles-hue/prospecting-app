@@ -32,6 +32,7 @@ const profiles = [
   { username: 'lsierra', password: 'lsierra903!' },
   { username: 'ebrundick', password: 'ebrundick123!' },
   { username: 'cmedina', password: 'cmedina123!' },
+  { username: 'agarcia', password: 'agarcia123!' },
 ];
 
 async function upsertProfile({ username, password }) {
