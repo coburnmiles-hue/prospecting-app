@@ -3802,6 +3802,34 @@ export default function ProspectingApp() {
     };
   }, [savedAccounts]);
 
+  // NRO CSV export
+  const exportNroCSV = () => {
+    if (!nroResults.length) return;
+    const rows = [['Name', 'Address', 'City', 'Zip', 'License Type', 'Date', 'Source', 'Has Sales Data', 'Est. Monthly Sales']];
+    nroResults.forEach(r => {
+      const date = r.original_issue_date || r.issue_date || r.submission_date || r.first_inspection || '';
+      rows.push([
+        r.location_name || '',
+        r.location_address || '',
+        r.location_city || '',
+        r.location_zip || '',
+        r.license_type || '',
+        date ? date.slice(0, 10) : '',
+        r.source || '',
+        r.has_sales ? 'Yes' : 'No',
+        r.total_receipts ? String(r.total_receipts) : '',
+      ]);
+    });
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement('a');
+    el.href = url;
+    el.download = `nro-search-${new Date().toISOString().slice(0, 10)}.csv`;
+    el.click();
+    URL.revokeObjectURL(url);
+  };
+
   // CSV export
   const exportAccountsCSV = () => {
     const rows = [[
@@ -4797,6 +4825,13 @@ export default function ProspectingApp() {
                   }`}
                 >
                   🗺️ Map
+                </button>
+                <button
+                  onClick={exportNroCSV}
+                  title="Export results to CSV"
+                  className="px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all bg-slate-900/70 border-slate-700 text-slate-300 hover:bg-emerald-800/60 hover:border-emerald-600 hover:text-emerald-300"
+                >
+                  ⬇ CSV
                 </button>
               </div>
             )}

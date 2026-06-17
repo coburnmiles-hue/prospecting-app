@@ -145,6 +145,31 @@ export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnackn
     }
   };
 
+  const exportCSV = () => {
+    if (!results.length) return;
+    const rows = [['Name', 'Address', 'City', 'Zip', 'License Type', 'Date', 'Status', 'Source']];
+    results.forEach(r => {
+      rows.push([
+        r.name || '',
+        r.address || '',
+        r.city || '',
+        r.zip || '',
+        r.license_type || '',
+        r.issue_date ? r.issue_date.slice(0, 10) : '',
+        r.status || '',
+        r.source || '',
+      ]);
+    });
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement('a');
+    el.href = url;
+    el.download = `territory-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    el.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Check if a result is already in savedAccounts
   const isSavedAccount = (result) => {
     if (!Array.isArray(savedAccounts)) return false;
@@ -273,18 +298,29 @@ export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnackn
             <Clock size={12} />
             <span>Last search: {formatDate(lastSearchedAt)}</span>
           </div>
-          <button
-            onClick={runSearch}
-            disabled={loading}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-          >
-            {loading ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <RefreshCw size={13} />
+          <div className="flex items-center gap-2">
+            {results.length > 0 && (
+              <button
+                onClick={exportCSV}
+                title="Export territory leads to CSV"
+                className="flex items-center gap-1.5 bg-slate-800 hover:bg-emerald-800/60 hover:border-emerald-600 hover:text-emerald-300 border border-slate-700 text-slate-300 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+              >
+                ⬇ CSV
+              </button>
             )}
-            {loading ? "Searching…" : "Refresh Now"}
-          </button>
+            <button
+              onClick={runSearch}
+              disabled={loading}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+            >
+              {loading ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <RefreshCw size={13} />
+              )}
+              {loading ? "Searching…" : "Refresh Now"}
+            </button>
+          </div>
         </div>
       )}
 
