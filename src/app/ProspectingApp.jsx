@@ -3802,6 +3802,79 @@ export default function ProspectingApp() {
     };
   }, [savedAccounts]);
 
+  // Map CSV export — exports only the accounts currently visible on the map (respects all active filters)
+  const exportMapCSV = () => {
+    const rows = [[
+      'Name', 'Address', 'GPV Tier', 'Active Opp', 'Active Account',
+      'Hot Lead', 'Referral', 'Strategic', 'Closed Lost', 'NRO', 'Notes Count', 'Last Activity'
+    ]];
+
+    (Array.isArray(savedAccounts) ? savedAccounts : []).forEach(account => {
+      try {
+        const parsed = parseSavedNotes(account.notes);
+        const tier = parsed?.gpvTier || null;
+
+        // Mirror updateMarkers filter logic exactly
+        if (!showSavedPins) return;
+        if (showActiveOnly && !parsed?.activeOpp) return;
+
+        const anyTagFilterActive = showReferralOnly || showHotLeadOnly || showStrategicOnly;
+        if (anyTagFilterActive) {
+          const matchesTag =
+            (showReferralOnly && !!parsed?.referral) ||
+            (showHotLeadOnly && !!parsed?.hotLead) ||
+            (showStrategicOnly && !!parsed?.strategic);
+          if (!matchesTag) return;
+        }
+
+        if (showClosedLostOnly && !parsed?.closedLost) return;
+
+        if (showNroOnly) {
+          if (tier !== 'nro') return;
+        } else {
+          if (tier && !visibleTiers.has(tier)) return;
+        }
+
+        if (parsed?.activeAccount && !visibleActiveAccounts) return;
+
+        const hasNotes = parsed?.notes && Array.isArray(parsed.notes) && parsed.notes.length > 0;
+        if (showUnvisitedOnly && hasNotes) return;
+
+        if (showOpenOnly) {
+          const bh = parsed?.businessHours;
+          if (!bh || bh.openNow !== true) return;
+        }
+
+        const notes = Array.isArray(parsed?.notes) ? parsed.notes : [];
+        const lastNote = notes.length > 0
+          ? [...notes].sort((x, y) => new Date(y.created_at) - new Date(x.created_at))[0].created_at?.slice(0, 10)
+          : '';
+
+        rows.push([
+          account.name || '', account.address || '', tier || '',
+          parsed?.activeOpp ? 'Yes' : 'No',
+          parsed?.activeAccount ? 'Yes' : 'No',
+          parsed?.hotLead ? 'Yes' : 'No',
+          parsed?.referral ? 'Yes' : 'No',
+          parsed?.strategic ? 'Yes' : 'No',
+          parsed?.closedLost ? 'Yes' : 'No',
+          tier === 'nro' ? 'Yes' : 'No',
+          notes.length, lastNote || ''
+        ]);
+      } catch {}
+    });
+
+    if (rows.length <= 1) return; // nothing to export
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement('a');
+    el.href = url;
+    el.download = `map-pins-${new Date().toISOString().slice(0, 10)}.csv`;
+    el.click();
+    URL.revokeObjectURL(url);
+  };
+
   // NRO CSV export
   const exportNroCSV = () => {
     if (!nroResults.length) return;
@@ -4643,17 +4716,17 @@ export default function ProspectingApp() {
 
                 {/* Generic Search */}
                 {nroSubView === "search" && (
-                  <div className="bg-gradient-to-br from-indigo-600/15 to-indigo-600/5 border border-indigo-500/30 rounded-3xl p-6 shadow-refined-lg">
+                  <div className="bg-gradient-to-br from-indigo-600/15 to-indigo-600/5 border border-indigo-500/30 rounded-3xl p-6 shadow-refined-lg overflow-hidden">
                     <div className="text-[10px] font-black uppercase text-indigo-400 tracking-widest mb-4">
                       New Retail Opportunities Search
                     </div>
                     <form onSubmit={handleNroSearch}>
                       <div className="space-y-3">
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 min-w-0">
                           <select
                             value={nroSearchType}
                             onChange={(e) => setNroSearchType(e.target.value)}
-                            className="bg-[#0F172A] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold text-slate-200 focus:border-indigo-500 focus:outline-none transition-colors uppercase cursor-pointer"
+                            className="flex-shrink-0 bg-[#0F172A] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold text-slate-200 focus:border-indigo-500 focus:outline-none transition-colors uppercase cursor-pointer"
                           >
                             <option value="city">City</option>
                             <option value="county">County</option>
@@ -4670,7 +4743,7 @@ export default function ProspectingApp() {
                             }
                             value={nroSearchTerm}
                             onChange={(e) => setNroSearchTerm(nroSearchType === 'zip' ? e.target.value : e.target.value.toUpperCase())}
-                            className="flex-1 bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
+                            className="flex-1 min-w-0 bg-[#071126] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none transition-colors"
                           />
                         </div>
                         <button
@@ -5830,6 +5903,14 @@ export default function ProspectingApp() {
                   </div>
 
                 </div>
+
+                {/* Export visible pins */}
+                <button
+                  onClick={exportMapCSV}
+                  className="mt-3 w-full px-3 py-2 rounded-xl border border-emerald-700/60 bg-emerald-900/30 hover:bg-emerald-800/50 text-emerald-300 text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  ⬇ Export Visible Pins CSV
+                </button>
               </div>
 
               <div className="absolute inset-0 bg-[#020617] z-10">

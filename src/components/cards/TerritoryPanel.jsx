@@ -340,7 +340,7 @@ export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnackn
 
       {zipCodes.length > 0 && results.length === 0 && !loading && (
         <div className="text-center py-10 text-slate-500">
-          <p className="text-sm">No new permits found in the last 30 days.</p>
+          <p className="text-sm">No new permits found in the last 90 days.</p>
           <p className="text-[10px] mt-1 text-slate-600">Click Refresh Now to run a fresh search.</p>
         </div>
       )}

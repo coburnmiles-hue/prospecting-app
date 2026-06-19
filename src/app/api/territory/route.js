@@ -3,7 +3,7 @@ import { getUserIdFromRequest } from "@/lib/auth";
 
 const TABC_APPROVED_URL = "https://data.texas.gov/resource/7hf9-qc9f.json";
 const TABC_PENDING_URL  = "https://data.texas.gov/resource/mxm5-tdpj.json";
-const LICENSE_TYPES = ["ME", "FB", "BG"];
+const LICENSE_TYPES = ["ME", "FB", "BG", "BE", "MB", "N", "NB", "NE", "BW"];
 
 async function ensureTable(sql) {
   await sql`
@@ -24,9 +24,9 @@ async function ensureTable(sql) {
 async function searchApproved(zipCodes) {
   if (!zipCodes || zipCodes.length === 0) return [];
 
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const dateFilter = thirtyDaysAgo.toISOString().split("T")[0];
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const dateFilter = ninetyDaysAgo.toISOString().split("T")[0];
 
   const licenseFilter = LICENSE_TYPES.map((t) => `license_type='${t}'`).join(" OR ");
   const zipFilter = zipCodes.map((z) => `zip='${z}'`).join(" OR ");
