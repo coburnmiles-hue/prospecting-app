@@ -26,12 +26,10 @@ import {
   Map as MapIcon,
   MapPin,
   Mic,
-  MoreHorizontal,
   Navigation,
   Search,
   Trophy,
   Bookmark,
-  TrendingUp,
 } from "lucide-react";
 
 // Recharts components used for charts
@@ -53,16 +51,12 @@ import SavedAccountsHeader from "../components/cards/SavedAccountsHeader";
 import ForecastCard from "../components/cards/ForecastCard";
 import AIIntelPanel from "../components/cards/AIIntelPanel";
 import VolumeAdjuster from "../components/cards/VolumeAdjuster";
-import ActivityLog from "../components/cards/ActivityLog";
 import GpvTierPanel from "../components/cards/GpvTierPanel";
-import PersonalMetrics from "../components/cards/PersonalMetrics";
-import TodayReminders from "../components/cards/TodayReminders";
 import TerritoryPanel from "../components/cards/TerritoryPanel";
 import PipelineBoard from "../components/cards/PipelineBoard";
 import VisitAlertsPanel from "../components/cards/VisitAlertsPanel";
 import TrendAlertsPanel from "../components/cards/TrendAlertsPanel";
 import AccountComparison from "../components/cards/AccountComparison";
-import VoiceAgent from "../components/VoiceAgent";
 
 // Utils and Constants
 import { 
@@ -78,7 +72,7 @@ import {
 import { VENUE_TYPES, GPV_TIERS, BASE_URL, DATE_FIELD, TOTAL_FIELD, TEXAS_CENTER } from "../utils/constants";
 
 // Custom Hooks
-import { useSavedAccounts, useMetricsData, useCalculatedMetrics } from "../hooks/useData";
+import { useSavedAccounts } from "../hooks/useData";
 import { useSearch, useTopLeaders } from "../hooks/useSearchAndTop";
 
 
@@ -133,16 +127,11 @@ export default function ProspectingApp() {
     }
   };
 
-  const [viewMode, setViewMode] = useState("agent"); // search | top | saved | metrics | map | nro | agent
+  const [viewMode, setViewMode] = useState("search"); // search | top | saved | map | nro
   const [savedSubView, setSavedSubView] = useState("list"); // list | info
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [moreButtonRect, setMoreButtonRect] = useState(null);
-  const moreButtonRef = useRef(null);
 
   // Custom hooks for data fetching
   const { savedAccounts, setSavedAccounts, refreshSavedAccounts } = useSavedAccounts();
-  const { metricsData, metricsLoading } = useMetricsData();
-  const { metrics: calculatedMetrics, loading: calculatedLoading } = useCalculatedMetrics();
   
   // Search hook
   const {
@@ -216,13 +205,6 @@ export default function ProspectingApp() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState("");
 
-  // Notes (client only in this version)
-  const [activityType, setActivityType] = useState("walk-in");
-  const [notesList, setNotesList] = useState([]);
-  const [followupsList, setFollowupsList] = useState([]);
-  const [notesExpanded, setNotesExpanded] = useState(false);
-  // notesOwner tracks which account the notesList belongs to: { id?: number|null, key?: string }
-  const [notesOwner, setNotesOwner] = useState({ id: null, key: null });
   const [selectedGpvTier, setSelectedGpvTier] = useState(null);
   const [selectedActiveOpp, setSelectedActiveOpp] = useState(false);
   const [selectedActiveAccount, setSelectedActiveAccount] = useState(false);
@@ -242,8 +224,6 @@ export default function ProspectingApp() {
   const [calculatedRoute, setCalculatedRoute] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const routePolylineRef = useRef(null);
-  const [savedRoutes, setSavedRoutes] = useState([]);
-  const [savedRoutesLoading, setSavedRoutesLoading] = useState(false);
   const [customStartPoint, setCustomStartPoint] = useState(null); // {lat, lng, address}
   const [isRoundTrip, setIsRoundTrip] = useState(false);
   const [mapRoutePlanMode, setMapRoutePlanMode] = useState(false);
@@ -687,10 +667,7 @@ export default function ProspectingApp() {
     setWonArr('');
     setWonDateSigned('');
     setIsEditingWonValues(false);
-    setNotesList([]);
-    setFollowupsList([]);
     setVenueTypeLocked(false);
-    setNotesOwner({ id: null, key: null });
 
     if (!est?.taxpayer_number || !est?.location_number) return;
 
@@ -833,10 +810,6 @@ export default function ProspectingApp() {
         return;
       }
 
-      // Determine notes to persist only if the current notesOwner matches this account
-      const notesToPersist = (notesOwner?.id && Number(notesOwner.id) === Number(info.id)) || (notesOwner?.key && notesOwner.key === key)
-        ? notesList
-        : [];
 
       const payload = {
         name: info.location_name || info.taxpayer_name || "Saved Account",
@@ -846,7 +819,7 @@ export default function ProspectingApp() {
         // store key + optional notes/history, GPV tier, and AI response in the notes field
         notes: JSON.stringify({ 
           key: `KEY:${key}`, 
-          notes: Array.isArray(notesToPersist) ? notesToPersist : [], 
+          notes: [], 
           history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [], 
           gpvTier: effectiveTier, 
           activeOpp: selectedActiveOpp,
@@ -933,7 +906,6 @@ export default function ProspectingApp() {
         });
         if (savedRecord?.id) {
           setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, id: savedRecord.id } } : s);
-          setNotesOwner(o => ({ ...o, id: savedRecord.id }));
         }
         setManualAddOpen(false);
         setManualQuery('');
@@ -946,7 +918,7 @@ export default function ProspectingApp() {
     }
   };
 
-  // ---------- Notes (persisted per saved account) ----------
+  // ---------- Restore saved account state ----------
   const fetchNotesForSelected = async (sel) => {
     if (!sel?.info) return;
 
@@ -986,10 +958,7 @@ export default function ProspectingApp() {
       setWonArr('');
       setWonDateSigned('');
       setIsEditingWonValues(false);
-      setNotesList([]);
-      setFollowupsList([]);
       setVenueTypeLocked(false);
-      setNotesOwner({ id: null, key: null });
       return;
     }
 
@@ -1022,21 +991,11 @@ export default function ProspectingApp() {
       if (!savingLockStateRef.current) {
         setVenueTypeLocked(parsed?.venueTypeLocked || false);
       }
-      // Set notes and owner, even if empty
-      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
-      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
-      setNotesOwner({ id: saved.id, key: parsed.key || null });
       return;
     } catch {}
-
-    // Fallback only if parsing completely failed - just set empty notes without resetting other state
-    setNotesList([]);
-    setFollowupsList([]);
-    setNotesOwner({ id: saved.id, key: null });
   };
 
   useEffect(() => {
-    setNotesExpanded(false);
     fetchNotesForSelected(selectedEstablishment);
     // populate coordinate editor from selectedEstablishment or savedAccounts
     if (selectedEstablishment && selectedEstablishment.info) {
@@ -1059,278 +1018,6 @@ export default function ProspectingApp() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment, savedAccounts]);
-
-  const handleAddNote = async (noteText) => {
-    const trimmedNote = (noteText || "").trim();
-    if (!trimmedNote || !selectedEstablishment?.info) return false;
-
-    const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
-
-    // Prefer direct ID match when possible, otherwise match by exact parsed key
-    let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
-      if (notesOwner?.id && a.id === notesOwner.id) return true; // most reliable — set by fetchNotesForSelected
-      if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
-      try {
-        const parsed = parseSavedNotes(a.notes);
-        if (parsed?.key && parsed.key === key) return true;
-      } catch {}
-      return false;
-    });
-
-    // Fallback: name+address match for territory/manual accounts without a taxpayer_number
-    if (!saved) {
-      const selName = (selectedEstablishment.info.location_name || '').toLowerCase().trim();
-      const selAddr = (selectedEstablishment.info.location_address || '').toLowerCase().trim();
-      if (selName && selAddr) {
-        saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find(a => {
-          const aName = (a.name || '').toLowerCase().trim();
-          const aAddr = (a.address || '').toLowerCase().trim();
-          return aName === selName && (aAddr === selAddr || aAddr.startsWith(selAddr));
-        });
-      }
-    }
-
-    // If not saved yet, auto-save the account first so notes can persist
-    if (!saved || !saved.id) {
-      try {
-        const info = selectedEstablishment.info;
-        const addr = getFullAddress(info);
-        let lat, lng;
-        
-        // Try to get coords from info or geocode
-        lat = Number(info.lat);
-        lng = Number(info.lng);
-        
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          try {
-            const q = encodeURIComponent(addr || "");
-            const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`;
-            const geoRes = await fetch(url, { headers: { "User-Agent": "prospecting-app" } });
-            if (geoRes.ok) {
-              const geoJson = await geoRes.json();
-              if (Array.isArray(geoJson) && geoJson[0]) {
-                lat = Number(geoJson[0].lat);
-                lng = Number(geoJson[0].lon);
-              }
-            }
-          } catch (e) {}
-        }
-
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          const pseudo = pseudoLatLng(info.taxpayer_number || info.location_number || addr);
-          lat = pseudo.lat;
-          lng = pseudo.lng;
-        }
-
-        const payload = {
-          name: info.location_name || info.name || "Account",
-          address: addr,
-          lat,
-          lng,
-          notes: JSON.stringify({ 
-            key: `KEY:${key}`, 
-            notes: [], 
-            history: Array.isArray(selectedEstablishment?.history) ? selectedEstablishment.history : [],
-            gpvTier: selectedGpvTier,
-            activeOpp: selectedActiveOpp,
-            closedLost: selectedClosedLost,
-            venueType: venueType,
-            venueTypeLocked: venueTypeLocked,
-            aiResponse: aiResponse || ""
-          }),
-        };
-
-        const res = await fetch("/api/accounts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          credentials: 'include'
-        });
-
-        if (!res.ok) throw new Error("Auto-save failed");
-        
-        const created = await res.json();
-        await refreshSavedAccounts();
-        
-        // Update selected establishment with new ID
-        setSelectedEstablishment(s => s ? { ...s, info: { ...s.info, id: created.id } } : s);
-        
-        saved = created;
-      } catch (err) {
-        setError(err?.message || "Could not save account for notes.");
-        return false;
-      }
-    }
-
-    try {
-      const res = await fetch(`/api/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: saved.id,
-          text: trimmedNote,
-          activity_type: activityType,
-          entry_type: 'activity',
-        }),
-        credentials: 'include'
-      });
-      
-      if (!res.ok) throw new Error("Note save failed");
-      
-      const body = await res.json();
-      
-      setNotesList(Array.isArray(body.notes) ? body.notes : []);
-      setFollowupsList(Array.isArray(body.followups) ? body.followups : followupsList);
-      setNotesOwner({ id: saved.id, key: null });
-      
-      // Reset activity type to default after adding note
-      setActivityType("walk-in");
-
-      // refresh current gpv tier from saved row if present
-      try {
-        const refreshedRes = await fetch("/api/accounts", { cache: "no-store", credentials: 'include' });
-        let refreshedAccounts = [];
-        if (refreshedRes.ok) {
-          const ct = refreshedRes.headers.get('content-type') || '';
-          if (ct.toLowerCase().includes('application/json')) {
-            const parsed = await refreshedRes.json().catch(() => []);
-            refreshedAccounts = Array.isArray(parsed) ? parsed : [];
-          }
-        }
-        const refreshedRow = refreshedAccounts.find((r) => r.id === saved.id);
-        if (refreshedRow) {
-          const parsed = parseSavedNotes(refreshedRow.notes);
-            if (parsed?.gpvTier !== selectedGpvTier) {
-              setSelectedGpvTier(parsed?.gpvTier || null);
-            }
-            if (parsed?.activeOpp !== selectedActiveOpp) {
-              setSelectedActiveOpp(parsed?.activeOpp || false);
-            }
-            if (parsed?.closedLost !== selectedClosedLost) {
-              setSelectedClosedLost(parsed?.closedLost || false);
-            }
-            if (parsed?.referral !== selectedReferral) {
-              setSelectedReferral(parsed?.referral || false);
-            }
-            if (parsed?.hotLead !== selectedHotLead) {
-              setSelectedHotLead(parsed?.hotLead || false);
-            }
-            if (parsed?.strategic !== selectedStrategic) {
-              setSelectedStrategic(parsed?.strategic || false);
-            }
-            if (parsed?.venueType && parsed.venueType !== venueType) {
-              setVenueType(parsed.venueType);
-            }
-            if (parsed?.venueTypeLocked !== venueTypeLocked) {
-              setVenueTypeLocked(parsed?.venueTypeLocked || false);
-            }
-        }
-      } catch {}
-
-      await refreshSavedAccounts();
-      return true;
-    } catch (err) {
-      setError(err?.message || "Could not save note.");
-      return false;
-    }
-  };
-
-  const handleAddFollowup = async (followUpAt, followUpNote) => {
-    const trimmedNote = (followUpNote || "").trim();
-    if (!trimmedNote || !followUpAt || !selectedEstablishment?.info) return false;
-
-    const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
-
-    let saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
-      if (notesOwner?.id && a.id === notesOwner.id) return true; // most reliable — set by fetchNotesForSelected
-      if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
-      try {
-        const parsed = parseSavedNotes(a.notes);
-        if (parsed?.key && parsed.key === key) return true;
-      } catch {}
-      return false;
-    });
-
-    if (!saved || !saved.id) {
-      return false;
-    }
-
-    try {
-      const res = await fetch(`/api/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: saved.id,
-          text: trimmedNote,
-          activity_type: activityType,
-          entry_type: 'followup',
-          follow_up_at: followUpAt,
-          follow_up_note: trimmedNote,
-        }),
-        credentials: 'include'
-      });
-
-      if (!res.ok) throw new Error("Follow-up save failed");
-
-      const body = await res.json();
-      setNotesList(Array.isArray(body.notes) ? body.notes : notesList);
-      setFollowupsList(Array.isArray(body.followups) ? body.followups : []);
-      setNotesOwner({ id: saved.id, key: null });
-      await refreshSavedAccounts();
-      return true;
-    } catch (err) {
-      setError(err?.message || "Could not save follow-up.");
-      return false;
-    }
-  };
-
-  const handleDeleteNote = async (noteId) => {
-    if (!noteId || !selectedEstablishment?.info) return;
-
-    const key = `${selectedEstablishment.info.taxpayer_number || ""}-${selectedEstablishment.info.location_number || ""}`;
-
-    const saved = (Array.isArray(savedAccounts) ? savedAccounts : []).find((a) => {
-      if (notesOwner?.id && a.id === notesOwner.id) return true; // most reliable — set by fetchNotesForSelected
-      if (selectedEstablishment.info.id && a.id === selectedEstablishment.info.id) return true;
-      try {
-        const parsed = parseSavedNotes(a.notes);
-        if (parsed?.key && parsed.key === key) return true;
-      } catch {}
-      return false;
-    });
-
-    if (!saved || !saved.id) {
-      setNotesList((prev) => prev.filter((n) => n.id !== noteId));
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/notes?accountId=${saved.id}&noteId=${noteId}`, { method: "DELETE", credentials: 'include' });
-      if (!res.ok) throw new Error("Delete failed");
-      const body = await res.json();
-      setNotesList(Array.isArray(body.notes) ? body.notes : []);
-
-      await refreshSavedAccounts();
-      const refreshed = savedAccounts;
-      try {
-        const refreshedRow = refreshed.find((r) => r.id === saved.id);
-        if (refreshedRow) {
-          const parsed = parseSavedNotes(refreshedRow.notes);
-          setSelectedGpvTier(parsed?.gpvTier || null);
-          setSelectedActiveOpp(parsed?.activeOpp || false);
-          setSelectedClosedLost(parsed?.closedLost || false);
-          setSelectedReferral(parsed?.referral || false);
-          setSelectedHotLead(parsed?.hotLead || false);
-          setSelectedStrategic(parsed?.strategic || false);
-          if (parsed?.venueType) {
-            setVenueType(parsed.venueType);
-          }
-        }
-      } catch {}
-    } catch (err) {
-      setError(err?.message || "Could not delete note.");
-    }
-  };
 
   // ---------- Route Planning ----------
   // Old route planning functions removed - route planning is now map-only
@@ -1450,22 +1137,6 @@ export default function ProspectingApp() {
     await fetchAiForInfo(info, { updateState: true });
   };
 
-  // Fetch saved routes
-  const fetchSavedRoutes = async () => {
-    setSavedRoutesLoading(true);
-    try {
-      const response = await fetch('/api/saved-routes', { credentials: 'include' });
-      if (response.ok) {
-        const data = await response.json();
-        setSavedRoutes(data);
-      }
-    } catch (error) {
-      console.error('Error fetching saved routes:', error);
-    } finally {
-      setSavedRoutesLoading(false);
-    }
-  };
-
   // Auto-trigger AI lookup when an account is selected (but only if no AI response exists)
   useEffect(() => {
 
@@ -1483,13 +1154,6 @@ export default function ProspectingApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEstablishment]);
 
-  // Fetch saved routes when Data tab is opened
-  useEffect(() => {
-    if (viewMode === "metrics") {
-      fetchSavedRoutes();
-    }
-  }, [viewMode]);
-
   // Load territory unacknowledged count on mount (for alert badge)
   useEffect(() => {
     const loadTerritoryCount = async () => {
@@ -1504,134 +1168,6 @@ export default function ProspectingApp() {
     };
     loadTerritoryCount();
   }, []);
-
-  // Initialize background maps for saved routes
-  useEffect(() => {
-    if (viewMode !== "metrics" || savedRoutes.length === 0) return;
-
-    const initRouteMaps = async () => {
-      // Ensure Leaflet is loaded
-      if (!window.L) {
-        // Load Leaflet if not already loaded
-        if (!document.querySelector('link[href*="leaflet.css"]')) {
-          const link = document.createElement("link");
-          link.rel = "stylesheet";
-          link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-          document.head.appendChild(link);
-        }
-
-        if (!document.querySelector('script[src*="leaflet.js"]')) {
-          const script = document.createElement("script");
-          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-          document.head.appendChild(script);
-        }
-
-        // Wait for Leaflet to load (even if script tag already existed)
-        await new Promise((resolve) => {
-          const checkInterval = setInterval(() => {
-            if (window.L) {
-              clearInterval(checkInterval);
-              resolve();
-            }
-          }, 100);
-        });
-      }
-
-      const L = window.L;
-      if (!L) return;
-
-      // Initialize map for each route
-      for (const route of savedRoutes) {
-        const mapId = `route-map-${route.id}`;
-        const mapElement = document.getElementById(mapId);
-
-        if (!mapElement || mapElement._leaflet_id) continue; // Skip if already initialized
-
-        try {
-          let routeData = route.route_data;
-          if (typeof routeData === 'string') {
-            try { routeData = JSON.parse(routeData); } catch { routeData = {}; }
-          }
-          routeData = routeData || {};
-
-          const map = L.map(mapElement, {
-            zoomControl: false,
-            attributionControl: false,
-            dragging: false,
-            scrollWheelZoom: false,
-            doubleClickZoom: false,
-            touchZoom: false,
-            boxZoom: false,
-            keyboard: false,
-          }).setView(TEXAS_CENTER, 10);
-
-          // Add tile layer
-          if (MAPBOX_KEY) {
-            L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
-              tileSize: 512,
-              zoomOffset: -1,
-              maxZoom: 22,
-            }).addTo(map);
-          } else {
-            L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-              maxZoom: 19,
-            }).addTo(map);
-          }
-
-          const stops = Array.isArray(routeData.stops)
-            ? routeData.stops
-            : (Array.isArray(routeData.accounts) ? routeData.accounts : []);
-
-          const validStops = stops.filter(s => Number.isFinite(Number(s?.lat)) && Number.isFinite(Number(s?.lng)));
-
-          const drawPolyline = (points) => {
-            if (!points || points.length === 0) return;
-            const routeLine = L.polyline(points, {
-              color: '#10b981',
-              weight: 3,
-              opacity: 0.9,
-            }).addTo(map);
-            map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
-            setTimeout(() => map.invalidateSize(), 100);
-          };
-
-          // Use stored road polyline if available, otherwise fetch from directions API
-          if (Array.isArray(routeData.polyline) && routeData.polyline.length > 0) {
-            drawPolyline(routeData.polyline);
-          } else if (validStops.length >= 2) {
-            // Fetch real road directions for this route
-            fetch('/api/route', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ waypoints: validStops, origin: validStops[0] }),
-            })
-              .then(r => r.ok ? r.json() : null)
-              .then(data => {
-                if (data?.polyline?.length > 0) {
-                  drawPolyline(data.polyline);
-                } else {
-                  // Last resort: straight lines
-                  drawPolyline(validStops.map(s => [Number(s.lat), Number(s.lng)]));
-                }
-              })
-              .catch(() => {
-                drawPolyline(validStops.map(s => [Number(s.lat), Number(s.lng)]));
-              });
-          } else {
-            // Not enough stops to draw anything meaningful
-            setTimeout(() => map.invalidateSize(), 100);
-          }
-        } catch (error) {
-          console.error('Error initializing route map:', error);
-        }
-      }
-    };
-
-    // Delay initialization to ensure DOM is ready
-    const timer = setTimeout(initRouteMaps, 100);
-    return () => clearTimeout(timer);
-  }, [viewMode, savedRoutes, MAPBOX_KEY]);
 
   // ---------- Map setup ----------
 
@@ -3307,9 +2843,6 @@ export default function ProspectingApp() {
               setSelectedReferral(parsed?.referral || false);
               setSelectedHotLead(parsed?.hotLead || false);
               setSelectedStrategic(parsed?.strategic || false);
-              setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
-              setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
-              setNotesOwner({ id: account.id, key: parsed.key || null });
               if (parsed?.venueType) setVenueType(parsed.venueType);
               setVenueTypeLocked(parsed?.venueTypeLocked || false);
 
@@ -3762,8 +3295,6 @@ export default function ProspectingApp() {
     const stillVisible = filteredSavedAccounts.some(a => a.id === selectedEstablishment.info.id);
     if (!stillVisible) {
       setSelectedEstablishment(null);
-      setNotesList([]);
-      setFollowupsList([]);
     }
   }, [filteredSavedAccounts, viewMode]);
 
@@ -3951,9 +3482,6 @@ export default function ProspectingApp() {
       setSelectedHotLead(parsed?.hotLead || false);
       setSelectedStrategic(parsed?.strategic || false);
       setVenueTypeLocked(parsed?.venueTypeLocked || false);
-      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
-      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
-      setNotesOwner({ id: account.id, key: parsed.key || null });
       if (parsed?.aiResponse) {
         skipAiLookupRef.current = true;
         setAiResponse(parsed.aiResponse);
@@ -4003,9 +3531,6 @@ export default function ProspectingApp() {
       setSelectedHotLead(parsed?.hotLead || false);
       setSelectedStrategic(parsed?.strategic || false);
       setVenueTypeLocked(parsed?.venueTypeLocked || false);
-      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
-      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
-      setNotesOwner({ id: data.id, key: parsed.key || null });
       
       // Restore AI response FIRST for all saved accounts
       if (parsed?.aiResponse) {
@@ -4091,13 +3616,8 @@ export default function ProspectingApp() {
             }
           }
           if (Array.isArray(parsed.notes) && parsed.notes.length) {
-            setNotesList(parsed.notes);
-            setNotesOwner({ id: data.id, key: parsed.key || null });
           } else {
-            setNotesList([]);
-            setNotesOwner({ id: data.id, key: parsed.key || null });
           }
-          setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
           setSelectedGpvTier(parsed?.gpvTier || null);
           setSelectedActiveOpp(parsed?.activeOpp || false);
           setSelectedClosedLost(parsed?.closedLost || false);
@@ -4220,8 +3740,6 @@ export default function ProspectingApp() {
             // Clear selected if it was the deleted account
             if (selectedEstablishment?.info?.id === data.id) {
               setSelectedEstablishment(null);
-              setNotesList([]);
-              setFollowupsList([]);
             }
           } catch (err) {
             setError(err?.message || 'Could not delete account.');
@@ -4253,7 +3771,6 @@ export default function ProspectingApp() {
           if (!s) setSelectedClosedLost(false); // turning ON: clear closed lost
           return !s;
         });
-        setNotesOwner((o) => ({ ...o, key }));
         return;
       }
 
@@ -4284,7 +3801,6 @@ export default function ProspectingApp() {
 
         setSelectedActiveOpp(notesObj.activeOpp || false);
         if (!wasActive) setSelectedClosedLost(false); // sync UI state
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Active Opp.");
       }
@@ -4314,7 +3830,6 @@ export default function ProspectingApp() {
           }
           return newValue;
         });
-        setNotesOwner((o) => ({ ...o, key }));
         return;
       }
 
@@ -4339,7 +3854,6 @@ export default function ProspectingApp() {
         await refreshSavedAccounts();
 
         setSelectedActiveAccount(notesObj.activeAccount || false);
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
         
         // If turning ON activeAccount and no saved won values yet, enter edit mode
         if (notesObj.activeAccount && !notesObj.wonGpv && !notesObj.wonArr && !notesObj.wonDateSigned) {
@@ -4370,7 +3884,6 @@ export default function ProspectingApp() {
 
       if (!saved || !saved.id) {
         setSelectedStrategic((s) => !s);
-        setNotesOwner((o) => ({ ...o, key }));
         return;
       }
 
@@ -4389,7 +3902,6 @@ export default function ProspectingApp() {
         await refreshSavedAccounts();
 
         setSelectedStrategic(notesObj.strategic || false);
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Strategic.");
       }
@@ -4414,7 +3926,6 @@ export default function ProspectingApp() {
           if (!s) setSelectedActiveOpp(false); // turning ON: clear active opp
           return !s;
         });
-        setNotesOwner((o) => ({ ...o, key }));
         return;
       }
 
@@ -4440,7 +3951,6 @@ export default function ProspectingApp() {
 
         setSelectedClosedLost(notesObj.closedLost || false);
         if (!wasClosedLost) setSelectedActiveOpp(false); // sync UI state
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Closed Lost.");
       }
@@ -4463,7 +3973,6 @@ export default function ProspectingApp() {
       // Local-only toggle for unsaved account
       if (!saved || !saved.id) {
         setSelectedReferral((s) => !s);
-        setNotesOwner((o) => ({ ...o, key }));
         return;
       }
 
@@ -4482,7 +3991,6 @@ export default function ProspectingApp() {
         await refreshSavedAccounts();
 
         setSelectedReferral(notesObj.referral || false);
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Referral.");
       }
@@ -4503,7 +4011,6 @@ export default function ProspectingApp() {
 
       if (!saved || !saved.id) {
         setSelectedHotLead((s) => !s);
-        setNotesOwner((o) => ({ ...o, key }));
         return;
       }
 
@@ -4522,7 +4029,6 @@ export default function ProspectingApp() {
         await refreshSavedAccounts();
 
         setSelectedHotLead(notesObj.hotLead || false);
-        setNotesOwner({ id: saved.id, key: parsed.key || null });
       } catch (err) {
         setError(err?.message || "Could not toggle Hot Lead.");
       }
@@ -4603,18 +4109,11 @@ export default function ProspectingApp() {
         </button>
       </header>
 
-      {/* AI Activity Logger full-page view */}
-      {viewMode === "agent" && (
-        <main className="flex flex-col items-center justify-start min-h-0 pb-32">
-          <VoiceAgent savedAccounts={savedAccounts} refreshSavedAccounts={refreshSavedAccounts} inline={true} />
-        </main>
-      )}
 
       {/* Main */}
-      {viewMode !== "agent" && (
       <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 pb-32">
         {/* Left column */}
-        {viewMode !== "metrics" && viewMode !== "map" && !(viewMode === "saved" && savedPanelMode !== "list") && (
+        {viewMode !== "map" && !(viewMode === "saved" && savedPanelMode !== "list") && (
           <aside className={`lg:col-span-4 space-y-6 ${viewMode === "saved" ? "order-first lg:order-none" : ""}`}>
             {viewMode === "saved" ? (
               <div className="space-y-3">
@@ -4805,24 +4304,12 @@ export default function ProspectingApp() {
                           }
                         }
                         setSelectedEstablishment({ info, history });
-                        // Don't pre-select NRO tier — user must click NRO button to set it
-                        if (history.length > 0) {
-                          const avg = history.reduce((s, h) => s + h.total, 0) / history.length;
-                          const annual = avg * 12;
-                          let tier = "tier1";
-                          if (annual >= 1000000) tier = "tier6";
-                          else if (annual >= 500000) tier = "tier5";
-                          else if (annual >= 250000) tier = "tier4";
-                          else if (annual >= 100000) tier = "tier3";
-                          else if (annual >= 50000) tier = "tier2";
-                          setSelectedGpvTier(tier);
-                        } else {
-                          setSelectedGpvTier(null);
-                        }
+                        // Always tag NRO accounts with NRO tier
+                        setSelectedGpvTier('nro');
                         await fetchAiForInfo(info, { updateState: true });
                       } catch {
                         setSelectedEstablishment({ info, history: [] });
-                        setSelectedGpvTier(null);
+                        setSelectedGpvTier('nro');
                         try { await fetchAiForInfo(info, { updateState: true }); } catch {}
                       } finally {
                         setLoading(false);
@@ -5280,26 +4767,8 @@ export default function ProspectingApp() {
                             history 
                           });
                           
-                          // Auto-select NRO tier for new opportunities, or calculate tier if sales exist
-                          if (history.length === 0) {
-                            // No sales data - set to NRO tier
-                            setSelectedGpvTier('nro');
-                          } else {
-                            // Has sales data - calculate appropriate tier based on forecast
-                            const total = history.reduce((sum, h) => sum + h.total, 0);
-                            const avg = total / history.length;
-                            const annualForecast = avg * 12;
-                            
-                            // Determine tier based on annual forecast
-                            let tier = 'tier1';
-                            if (annualForecast >= 1000000) tier = 'tier6';
-                            else if (annualForecast >= 500000) tier = 'tier5';
-                            else if (annualForecast >= 250000) tier = 'tier4';
-                            else if (annualForecast >= 100000) tier = 'tier3';
-                            else if (annualForecast >= 50000) tier = 'tier2';
-                            
-                            setSelectedGpvTier(tier);
-                          }
+                          // Always tag NRO accounts with NRO tier
+                          setSelectedGpvTier('nro');
                           
                           // Fetch AI info for NRO account
                           await fetchAiForInfo(item, { updateState: true });
@@ -5428,7 +4897,7 @@ export default function ProspectingApp() {
         )}
 
         {/* Right column */}
-        <section className={`${(viewMode === "metrics" || viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"} ${viewMode === "saved" ? "order-last lg:order-none" : ""}`}>
+        <section className={`${(viewMode === "map" || (viewMode === "saved" && savedPanelMode !== "list")) ? "lg:col-span-12" : "lg:col-span-8"} ${viewMode === "saved" ? "order-last lg:order-none" : ""}`}>
           {/* Saved sub-view tabs (always shown in saved mode) */}
           {viewMode === "saved" && (
             <div className="flex items-center gap-1.5 bg-[#1E293B] rounded-2xl border border-slate-700 p-1.5 mb-4">
@@ -6396,262 +5865,6 @@ export default function ProspectingApp() {
             </div>
             </>
           )}
-          {viewMode === "metrics" && (
-            <div className="space-y-6">
-              {/* Metrics Section */}
-              <PersonalMetrics 
-                data={metricsData}
-                calculatedMetrics={calculatedMetrics}
-                savedAccounts={savedAccounts}
-                refreshSavedAccounts={refreshSavedAccounts}
-                onActivityClick={async (accountId) => {
-                  // Switch to saved view and select the account
-                  setViewMode('saved');
-                  setSavedSubView('info');
-                  
-                  // Find the account in savedAccounts
-                  const account = savedAccounts.find(a => a.id === accountId);
-                  if (account) {
-                    // Create establishment object from saved account
-                    try {
-                      const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
-                      const keyParts = parsed?.key ? parsed.key.split('-') : [];
-                      
-                      // Load saved AI response if available
-                      if (parsed?.aiResponse) {
-                        skipAiLookupRef.current = true;
-                        setAiResponse(parsed.aiResponse);
-                        setAiLoading(false);
-                      } else {
-                        skipAiLookupRef.current = false;
-                        setAiResponse("");
-                      }
-                      
-                      // Load notes list
-                      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
-                      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
-                      setNotesOwner({ id: account.id, key: parsed.key || null });
-                      
-                      setSelectedEstablishment({
-                        info: {
-                          id: account.id,
-                          location_name: account.name,
-                          location_address: account.address,
-                          taxpayer_number: keyParts[0] || undefined,
-                          location_number: keyParts[1] || undefined,
-                          lat: account.lat,
-                          lng: account.lng,
-                          notes: account.notes, // Include notes for hours/website caching
-                        },
-                        history: Array.isArray(parsed?.history) ? parsed.history : [],
-                      });
-                    } catch (e) {
-                      console.error('Failed to load account:', e);
-                    }
-                  }
-                }}
-              />
-
-              {/* Today's Reminders Section */}
-              <TodayReminders
-                savedAccounts={savedAccounts}
-                onAccountClick={async (accountId) => {
-                  setViewMode('saved');
-                  setSavedSubView('info');
-                  const account = savedAccounts.find(a => a.id === accountId);
-                  if (account) {
-                    try {
-                      const parsed = typeof account.notes === 'string' ? JSON.parse(account.notes) : account.notes;
-                      const keyParts = parsed?.key ? parsed.key.replace(/^KEY:/, '').split('-') : [];
-                      if (parsed?.aiResponse) {
-                        skipAiLookupRef.current = true;
-                        setAiResponse(parsed.aiResponse);
-                        setAiLoading(false);
-                      } else {
-                        skipAiLookupRef.current = false;
-                        setAiResponse("");
-                      }
-                      setNotesList(Array.isArray(parsed.notes) ? parsed.notes : []);
-                      setFollowupsList(Array.isArray(parsed.followups) ? parsed.followups : []);
-                      setNotesOwner({ id: account.id, key: parsed.key || null });
-                      setSelectedEstablishment({
-                        info: {
-                          id: account.id,
-                          location_name: account.name,
-                          location_address: account.address,
-                          taxpayer_number: keyParts[0] || undefined,
-                          location_number: keyParts[1] || undefined,
-                          lat: account.lat,
-                          lng: account.lng,
-                          notes: account.notes,
-                        },
-                        history: Array.isArray(parsed?.history) ? parsed.history : [],
-                      });
-                    } catch (e) {
-                      console.error('Failed to load account:', e);
-                    }
-                  }
-                }}
-              />
-
-              {/* Saved Routes Section */}
-              <div className="bg-[#1E293B] p-6 rounded-3xl border border-slate-700/50 shadow-refined-lg">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Saved Routes</h2>
-                  <button
-                    onClick={fetchSavedRoutes}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all shadow-refined hover:shadow-refined-lg hover:scale-105"
-                  >
-                    Refresh
-                  </button>
-                </div>
-                {savedRoutesLoading ? (
-                  <div className="text-center py-8">
-                    <Loader2 size={32} className="text-indigo-600 animate-spin mx-auto" />
-                  </div>
-                ) : savedRoutes.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400">
-                    <p className="text-sm">No saved routes yet. Create a route in the Saved tab to save it here.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3 max-h-[600px] overflow-y-auto custom-scroll pr-2">
-                    {savedRoutes.map((route) => {
-                      const routeData = typeof route.route_data === 'string' ? JSON.parse(route.route_data) : route.route_data;
-                      const mapId = `route-map-${route.id}`;
-                      return (
-                        <div key={route.id} className="relative bg-slate-900/50 border border-slate-700/50 rounded-2xl overflow-hidden shadow-refined-lg hover:border-slate-600/50 transition-all duration-300">
-                          {/* Background Map */}
-                          <div 
-                            id={mapId}
-                            className="absolute inset-0"
-                            style={{ zIndex: 0 }}
-                          />
-                          
-                          {/* Content */}
-                          <div className="relative p-5 bg-gradient-to-r from-slate-900/90 via-slate-900/50 to-slate-900/90" style={{ zIndex: 2 }}>
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex-1">
-                                <h3 className="text-white font-bold text-sm mb-1">{route.name}</h3>
-                                <p className="text-slate-400 text-[10px] uppercase tracking-widest">
-                                  {new Date(route.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                </p>
-                              </div>
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => {
-                                    // Load route into map edit mode
-                                    const stops = (routeData.stops || routeData.accounts || []).map(a => ({
-                                      id: a.id,
-                                      name: a.name,
-                                      lat: a.lat,
-                                      lng: a.lng,
-                                      address: a.address || '',
-                                    }));
-                                    mapRoutePlanModeRef.current = true;
-                                    setMapRoutePlanMode(true);
-                                    setMapRouteStops(stops);
-                                    setViewMode('map');
-                                  }}
-                                  className="text-indigo-400 hover:text-indigo-300 text-sm font-bold transition-colors"
-                                  title="Edit route on map"
-                                >
-                                  ✎
-                                </button>
-                                <button
-                                  onClick={async () => {
-                                    if (confirm('Delete this route?')) {
-                                      try {
-                                        const response = await fetch(`/api/saved-routes?id=${route.id}`, { method: 'DELETE' });
-                                        if (response.ok) {
-                                          await fetchSavedRoutes();
-                                        }
-                                      } catch (error) {
-                                        console.error('Delete error:', error);
-                                      }
-                                    }
-                                  }}
-                                  className="text-slate-400 hover:text-red-400 text-sm transition-colors"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                            {(routeData.calculatedRoute || routeData.distance) && (
-                              <div className="flex items-center gap-4 mb-3">
-                                <div className="text-emerald-400 font-bold text-sm">
-                                  {((routeData.calculatedRoute?.distance || routeData.distance) / 1609.34).toFixed(1)} mi
-                                </div>
-                                <div className="text-slate-500">•</div>
-                                <div className="text-emerald-400 font-bold text-sm">
-                                  {Math.round((routeData.calculatedRoute?.duration || routeData.duration) / 60)} min
-                                </div>
-                              </div>
-                            )}
-                            <div className="mb-3">
-                              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Stops ({(routeData.stops || routeData.accounts || []).length})</div>
-                              <div className="space-y-1">
-                                {(routeData.stops || routeData.accounts || []).map((account, idx) => (
-                                  <div key={idx} className="text-[11px] text-slate-300 flex items-center gap-2">
-                                    <span className="bg-indigo-600 rounded-full w-5 h-5 flex items-center justify-center text-white font-bold text-[9px]">
-                                      {idx + 1}
-                                    </span>
-                                    {account.name}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                            <button
-                              onClick={async () => {
-                                // Open the window synchronously (must happen before any await,
-                                // otherwise iOS Safari's popup blocker will suppress it)
-                                const win = window.open('', '_blank');
-
-                                const waypointCoords = [];
-                                
-                                // Add custom start point if available
-                                if (routeData.customStartPoint && routeData.customStartPoint.lat && routeData.customStartPoint.lng) {
-                                  waypointCoords.push(`${routeData.customStartPoint.lat},${routeData.customStartPoint.lng}`);
-                                } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
-                                  // Get current location as start point
-                                  try {
-                                    const pos = await new Promise((resolve, reject) => {
-                                      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
-                                    });
-                                    waypointCoords.push(`${pos.coords.latitude},${pos.coords.longitude}`);
-                                  } catch (e) {
-                                    // If geolocation fails, don't add a start point
-                                  }
-                                }
-                                
-                                // Add route stops
-                                (routeData.stops || routeData.accounts || []).forEach(a => {
-                                  waypointCoords.push(`${a.lat},${a.lng}`);
-                                });
-                                
-                                // Add round trip back to start if needed
-                                if (routeData.isRoundTrip && waypointCoords.length > 0) {
-                                  waypointCoords.push(waypointCoords[0]);
-                                }
-                                
-                                if (waypointCoords.length > 0) {
-                                  win.location.href = `https://www.google.com/maps/dir/${waypointCoords.join('/')}`;
-                                } else if (win) {
-                                  win.close();
-                                }
-                              }}
-                              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-2 px-3 rounded-xl transition-all shadow-refined hover:shadow-refined-lg hover:scale-[1.02]"
-                            >
-                              Open in Google Maps
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
           {selectedEstablishment && !(viewMode === "saved" && savedPanelMode === "compare") && (
             <div className={viewMode === "map" ? "mt-6 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : (viewMode === "saved" && savedPanelMode === "pipeline") ? "mt-8 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : "space-y-6 animate-in slide-in-from-bottom-4 duration-500"}>
               {/* Manual account banner */}
@@ -6868,27 +6081,10 @@ export default function ProspectingApp() {
                     <div className="flex items-center gap-3 shrink-0">
                     <div className="flex flex-col gap-2">
                       <SaveButton
-                        onClick={toggleSaveAccount}
+                        onClick={viewMode === "nro" ? () => { setSelectedGpvTier('nro'); toggleSaveAccount('nro'); } : toggleSaveAccount}
                         isSaved={isSaved(selectedEstablishment.info)}
                         disabled={aiLoading && !isSaved(selectedEstablishment.info)}
                       />
-                      {viewMode === "nro" && (
-                        <button
-                          onClick={() => {
-                            setSelectedGpvTier('nro');
-                            toggleSaveAccount('nro');
-                          }}
-                          disabled={aiLoading && !isSaved(selectedEstablishment.info)}
-                          className={`flex flex-col items-center justify-center w-16 h-16 rounded-[1.5rem] border transition-all text-[8px] font-black uppercase ${
-                            isSaved(selectedEstablishment.info)
-                              ? "bg-emerald-600 border-emerald-500 text-white"
-                              : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
-                          } disabled:opacity-50 disabled:cursor-not-allowed`}
-                        >
-                          <span className="text-lg leading-none mb-1">✦</span>
-                          NRO
-                        </button>
-                      )}
                     </div>
 
                     <ForecastCard total={stats?.total || 0} isActualGpv={stats?.isActualGpv} />
@@ -7101,24 +6297,9 @@ export default function ProspectingApp() {
                 onSaveWonValues={saveWonValues}
               />
 
-              {/* Notes (for saved accounts and selected NRO accounts) */}
-              {(selectedEstablishment?.info?.id || selectedEstablishment?.info?.location_name) && (
-                <ActivityLog
-                  key={`${selectedEstablishment?.info?.id || ''}-${selectedEstablishment?.info?.taxpayer_number || ''}-${selectedEstablishment?.info?.location_number || ''}`}
-                  notesList={notesList}
-                  followupsList={followupsList}
-                  onAddNote={handleAddNote}
-                  onAddFollowup={handleAddFollowup}
-                  onDeleteNote={handleDeleteNote}
-                  notesExpanded={notesExpanded}
-                  setNotesExpanded={setNotesExpanded}
-                  activityType={activityType}
-                  setActivityType={setActivityType}
-                />
-              )}
             </div>
           )}
-          {viewMode !== "map" && viewMode !== "metrics" && !selectedEstablishment && (
+          {viewMode !== "map" && !selectedEstablishment && (
             <div className="h-[600px] flex flex-col items-center justify-center text-center bg-[#1E293B]/20 rounded-[3rem] border border-dashed border-slate-700">
               {viewMode === "top" && topViewMode === "map" ? (
                 <>
@@ -7141,7 +6322,6 @@ export default function ProspectingApp() {
           )}
         </section>
       </main>
-      )}
 
       {/* Fixed Bottom Navigation Dock */}
       <nav className="fixed bottom-0 left-0 right-0 z-[9999] pb-safe pointer-events-none">
@@ -7153,7 +6333,6 @@ export default function ProspectingApp() {
                 setSavedSubView("list");
                 setSelectedEstablishment(null);
                 setAiResponse("");
-                setMoreMenuOpen(false);
               }}
               className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "search" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
@@ -7166,7 +6345,6 @@ export default function ProspectingApp() {
                 setViewMode("saved");
                 setSelectedEstablishment(null);
                 setAiResponse("");
-                setMoreMenuOpen(false);
               }}
               className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "saved" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
@@ -7174,98 +6352,31 @@ export default function ProspectingApp() {
               <span>Saved</span>
             </button>
 
-            {/* ── AI Logger dock button (center) ── */}
-            <button
-              onClick={() => {
-                setViewMode("agent");
-                setSelectedEstablishment(null);
-                setAiResponse("");
-                setMoreMenuOpen(false);
-              }}
-              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "agent" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
-            >
-              <Mic size={18} className="mb-1" />
-              <span>Log</span>
-            </button>
 
-            <button
-              onClick={() => {
-                setViewMode("metrics");
-                setSavedSubView("list");
-                setSelectedEstablishment(null);
-                setAiResponse("");
-                setMoreMenuOpen(false);
-              }}
-              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "metrics" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
-            >
-              <TrendingUp size={18} className="mb-1" />
-              <span>Data</span>
-            </button>
-
-            {/* ── More menu button ── */}
-            <div className="relative flex-1">
-              <button
-                ref={moreButtonRef}
-                onClick={() => {
-                  const rect = moreButtonRef.current?.getBoundingClientRect();
-                  setMoreButtonRect(rect || null);
-                  setMoreMenuOpen(o => !o);
-                }}
-                className={`dock-item w-full flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${["top","nro","map"].includes(viewMode) ? "dock-item-active text-white" : (moreMenuOpen ? "text-white" : "text-slate-400 hover:text-white")}`}
-              >
-                <div className="relative">
-                  <MoreHorizontal size={18} className="mb-1" />
-                  {territoryUnacknowledgedCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">
-                      {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
-                    </span>
-                  )}
-                </div>
-                <span>More</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* More popup menu — rendered outside nav to avoid backdrop-filter stacking context */}
-      {moreMenuOpen && (
-        <>
-          <div className="fixed inset-0 z-[9998]" onClick={() => setMoreMenuOpen(false)} />
-          <div
-            className="fixed z-[9999] bg-[#0f172a] border border-slate-700/60 rounded-2xl shadow-2xl p-2 flex flex-col gap-1 min-w-[160px]"
-            style={{
-              boxShadow: "0 -8px 32px rgba(0,0,0,0.5)",
-              bottom: moreButtonRect ? `${window.innerHeight - moreButtonRect.top + 8}px` : "5rem",
-              left: moreButtonRect ? `${moreButtonRect.left + moreButtonRect.width / 2}px` : "auto",
-              transform: "translateX(-50%)",
-            }}
-          >
             <button
               onClick={() => {
                 setViewMode("top");
                 setSavedSubView("list");
                 setSelectedEstablishment(null);
                 setAiResponse("");
-                setMoreMenuOpen(false);
               }}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all w-full text-left ${viewMode === "top" ? "bg-indigo-500/20 text-indigo-300" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "top" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
-              <Trophy size={16} />
+              <Trophy size={18} className="mb-1" />
               <span>Leaders</span>
             </button>
+
             <button
               onClick={() => {
                 setViewMode("nro");
                 setSavedSubView("list");
                 setSelectedEstablishment(null);
                 setAiResponse("");
-                setMoreMenuOpen(false);
               }}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all w-full text-left ${viewMode === "nro" ? "bg-indigo-500/20 text-indigo-300" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "nro" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
-              <div className="relative">
-                <Sparkles size={16} />
+              <div className="relative mb-1">
+                <Sparkles size={18} />
                 {territoryUnacknowledgedCount > 0 && (
                   <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-orange-500 rounded-full text-[7px] font-black text-white flex items-center justify-center">
                     {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
@@ -7274,20 +6385,20 @@ export default function ProspectingApp() {
               </div>
               <span>NRO</span>
             </button>
+
             <button
               onClick={() => {
                 setViewMode("map");
                 setSelectedEstablishment(null);
-                setMoreMenuOpen(false);
               }}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all w-full text-left ${viewMode === "map" ? "bg-indigo-500/20 text-indigo-300" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}
+              className={`dock-item flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl text-[9px] font-black transition-all uppercase tracking-widest ${viewMode === "map" ? "dock-item-active text-white" : "text-slate-400 hover:text-white"}`}
             >
-              <MapIcon size={16} />
+              <MapIcon size={18} className="mb-1" />
               <span>Map</span>
             </button>
           </div>
-        </>
-      )}
+        </div>
+      </nav>
 
       {/* Small CSS helpers */}
       <style>{`
