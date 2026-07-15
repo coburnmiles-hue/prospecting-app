@@ -397,6 +397,8 @@ export default function TerritoryPanel({ savedAccounts, onAccountClick, onUnackn
 
 function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount }) {
   const isPending = result.source === "TABC Pending Application";
+  const isSalesTaxPermit = result.source === "Texas Sales-Tax Permit";
+  const isFirstInspection = result.source === "Austin First Inspection";
   const borderColor = saved ? "border-emerald-500/40" : acknowledged ? "border-slate-700/50" : isPending ? "border-violet-500/40" : "border-amber-500/40";
   const bgColor = saved ? "bg-emerald-900/10" : acknowledged ? "bg-slate-900/40" : isPending ? "bg-violet-900/10" : "bg-amber-900/10";
   const badge = saved
@@ -405,7 +407,7 @@ function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount 
     ? { label: "Reviewed", color: "bg-slate-700/50 text-slate-500 border-slate-600/30" }
     : { label: "New", color: "bg-amber-500/20 text-amber-400 border-amber-500/30" };
 
-  const dateLabel = isPending ? "Applied" : "Issued";
+  const dateLabel = isPending ? "Applied" : isFirstInspection ? "First inspected" : isSalesTaxPermit ? "Permit issued" : "Issued";
   const issueDate = result.issue_date
     ? new Date(result.issue_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;
@@ -429,6 +431,16 @@ function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount 
                 Pending
               </span>
             )}
+            {isSalesTaxPermit && (
+              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border bg-sky-500/20 text-sky-300 border-sky-500/30">
+                Pre-opening
+              </span>
+            )}
+            {isFirstInspection && (
+              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border bg-teal-500/20 text-teal-300 border-teal-500/30">
+                First inspection
+              </span>
+            )}
           </div>
           {result.address && (
             <p className="text-slate-400 text-[10px] mt-0.5 truncate">
@@ -450,6 +462,9 @@ function ResultCard({ result, saved, acknowledged, onAcknowledge, onViewAccount 
               <span className="text-[10px] text-violet-400 font-semibold truncate">
                 {result.status}
               </span>
+            )}
+            {!isPending && result.source && (
+              <span className="text-[10px] text-slate-500 truncate">{result.source}</span>
             )}
           </div>
         </div>

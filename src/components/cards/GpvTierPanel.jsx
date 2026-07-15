@@ -60,58 +60,6 @@ export default function GpvTierPanel({
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
               <button
-                onClick={onToggleReferral}
-                className={`flex-1 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                  selectedReferral ? "bg-purple-500 text-white" : "opacity-70"
-                }`}
-                style={{ borderColor: selectedReferral ? "#a855f7" : "#334155" }}
-              >
-                Referral
-              </button>
-
-              <button
-                onClick={onToggleHotLead}
-                className={`flex-1 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                  selectedHotLead ? "bg-orange-500 text-white" : "opacity-70"
-                }`}
-                style={{ borderColor: selectedHotLead ? "#f97316" : "#334155" }}
-              >
-                🔥 Hot Lead
-              </button>
-
-              <button
-                onClick={onToggleStrategic}
-                className={`flex-1 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                  selectedStrategic ? "bg-sky-500 text-white" : "opacity-70"
-                }`}
-                style={{ borderColor: selectedStrategic ? "#0ea5e9" : "#334155" }}
-              >
-                ⚡ Strategic
-              </button>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={onToggleActiveOpp}
-                className={`flex-1 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                  selectedActiveOpp ? "bg-emerald-500 text-white" : "opacity-70"
-                }`}
-                style={{ borderColor: selectedActiveOpp ? "#10b981" : "#334155" }}
-              >
-                Active Opp
-              </button>
-
-              <button
-                onClick={onToggleClosedLost}
-                className={`flex-1 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
-                  selectedClosedLost ? "bg-rose-600 text-white" : "opacity-70"
-                }`}
-                style={{ borderColor: selectedClosedLost ? "#e11d48" : "#334155" }}
-              >
-                Closed Lost
-              </button>
-
-              <button
                 onClick={onToggleActiveAccount}
                 className={`flex-1 px-3 py-2 rounded-xl font-black text-[11px] uppercase transition-all focus:outline-none border ${
                   selectedActiveAccount ? "bg-emerald-500 text-white" : "opacity-70"

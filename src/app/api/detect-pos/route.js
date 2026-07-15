@@ -219,6 +219,15 @@ async function fetchAndScanHrefs(url) {
         htmlResult.pos = headerPos;
         htmlResult.headerDetected = true;
       }
+      // Coming-soon / pre-opening detection: look for strong signals in page text
+      const lowerHtml = html.toLowerCase();
+      const comingSoonPhrases = [
+        'coming soon', 'opening soon', 'grand opening', 'opening in', 'now hiring',
+        'opens in', 'open in', 'we\'re opening', "we're coming", 'stay tuned',
+        'follow us for updates', 'sign up for updates', 'get notified', 'join our waitlist',
+        'under construction', 'website coming soon',
+      ];
+      htmlResult.comingSoon = comingSoonPhrases.some(phrase => lowerHtml.includes(phrase));
       return htmlResult;
     } catch {
       clearTimeout(timer);
@@ -271,6 +280,7 @@ export async function GET(req) {
     let posSource = null;
     let posSourceUrl = null;
     let thirdParty = [];
+    let comingSoon = false;
 
     // Pass 1: check if the website URL itself is a known POS platform
     const urlMatch = scanUrl(website, POS_SIGNATURES);
@@ -288,6 +298,7 @@ export async function GET(req) {
           posSourceUrl = htmlResult.posUrl || null;
         }
         thirdParty = htmlResult.thirdParty;
+        if (htmlResult.comingSoon) comingSoon = true;
       }
     }
 
@@ -350,7 +361,7 @@ export async function GET(req) {
       } catch { /* not on Toast */ }
     }
 
-    const result = { pos, source: posSource, sourceUrl: posSourceUrl, thirdParty };
+    const result = { pos, source: posSource, sourceUrl: posSourceUrl, thirdParty, comingSoon };
     posCache.set(cacheKey, { result, timestamp: Date.now() });
     if (posCache.size > 500) posCache.delete(posCache.keys().next().value);
 

@@ -6,6 +6,7 @@ export async function POST(req) {
     const businessName = body.name || "(unknown)";
     const city = body.city || "Texas";
     const taxpayer = body.taxpayer || businessName;
+    const mode = body.mode || "business"; // "business" | "area_radar"
 
     // If no key is configured return a safe mock so the UI can be tested locally
     if (!key) {
@@ -13,8 +14,31 @@ export async function POST(req) {
       return new Response(JSON.stringify({ mock: true, text: mockText }), { status: 200 });
     }
 
-    // Three-section prompt requesting structured output
-    const prompt = `Research this business and provide specific factual information in exactly this format:
+    let prompt;
+
+    if (mode === "area_radar") {
+      // Area Opening Radar: find upcoming restaurants NOT yet open in a given city/area
+      prompt = `You are a restaurant industry market researcher. Find restaurants and food & beverage concepts that are COMING SOON or OPENING SOON in ${city}, Texas. Focus on independent restaurants, not national chains.
+
+Research specifically:
+1. Announced new restaurant openings, pop-ups turning permanent, chef-driven concepts
+2. Social media announcements (Instagram, Facebook) hinting at upcoming openings
+3. Recent news articles about restaurant openings in ${city}
+4. Any notable chef or restaurateur activity in ${city}
+5. New mixed-use or commercial developments with restaurant tenants announced
+
+Respond in EXACTLY this format (no introduction, start directly with UPCOMING:):
+
+UPCOMING: [List 3-6 specific upcoming concepts. For each: Name — brief description — location/neighborhood if known — estimated opening timeframe if known. One entry per line.]
+
+MARKET INTEL: [2-3 sentences about the current restaurant climate in ${city} — is it growing, what cuisine categories are trending, what neighborhoods are hot for new openings]
+
+TIPS: [2-3 actionable prospecting tips specific to finding pre-opening restaurants in ${city}, Texas right now]
+
+Use real, specific information from current sources. If you cannot find specific upcoming openings, say so clearly in the UPCOMING section.`;
+    } else {
+      // Standard business research prompt
+      prompt = `Research this business and provide specific factual information in exactly this format:
 
 Business: ${businessName}
 Location: ${city}, Texas
@@ -29,6 +53,7 @@ LOCATION COUNT: [State exactly how many physical locations this business operate
 ACCOUNT DETAILS: [Provide: Business type/industry, services offered, approximate size/scale, year established if known, notable information about operations]
 
 Do not include any preamble or closing. Start directly with "OWNERS:" and provide factual, specific information for each section.`;
+    }
 
     // Helper: call Gemini with retry/backoff
     const callGeminiWithRetry = async (payload, retries = 4, delay = 800) => {
@@ -67,11 +92,14 @@ Do not include any preamble or closing. Start directly with "OWNERS:" and provid
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
       systemInstruction: { 
-        parts: [{ text: "You are a business research assistant. Provide factual business information in the exact format requested. Do not include preambles or acknowledgments." }] 
+        parts: [{ text: mode === "area_radar" 
+          ? "You are a restaurant industry market researcher with deep knowledge of the Texas dining scene. Use Google Search to find current, real information about upcoming restaurant openings. Be specific and factual."
+          : "You are a business research assistant. Provide factual business information in the exact format requested. Do not include preambles or acknowledgments." 
+        }] 
       },
       generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
+        temperature: mode === "area_radar" ? 0.5 : 0.7,
+        maxOutputTokens: mode === "area_radar" ? 3000 : 2048,
       },
       tools: [{ googleSearch: {} }]
     };
@@ -87,7 +115,7 @@ Do not include any preamble or closing. Start directly with "OWNERS:" and provid
     console.log('Gemini response:', JSON.stringify(parsed, null, 2));
     const candidateText = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || parsed?.candidates?.[0]?.output || "";
 
-    return new Response(JSON.stringify({ raw: parsed, text: candidateText }), { status: 200 });
+    return new Response(JSON.stringify({ raw: parsed, text: candidateText, mode }), { status: 200 });
   } catch (err) {
     return new Response(JSON.stringify({ error: err?.message || String(err) }), { status: 500 });
   }

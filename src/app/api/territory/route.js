@@ -3,6 +3,8 @@ import { getUserIdFromRequest } from "@/lib/auth";
 
 const TABC_APPROVED_URL = "https://data.texas.gov/resource/7hf9-qc9f.json";
 const TABC_PENDING_URL  = "https://data.texas.gov/resource/mxm5-tdpj.json";
+const SALES_TAX_PERMITS_URL = "https://data.texas.gov/resource/jrea-zgmq.json";
+const AUSTIN_INSPECTIONS_URL = "https://data.austintexas.gov/resource/ecmv-9xxi.json";
 const LICENSE_TYPES = ["ME", "FB", "BG", "BE", "MB", "N", "NB", "NE", "BW"];
 
 async function ensureTable(sql) {
@@ -85,14 +87,91 @@ async function searchPending(zipCodes) {
   }
 }
 
+// Query recently issued restaurant sales-tax permits statewide. A missing or future
+// first-sales date is a strong signal that the named business has not opened yet.
+async function searchSalesTaxPermits(zipCodes) {
+  if (!zipCodes || zipCodes.length === 0) return [];
+
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const dateFilter = ninetyDaysAgo.toISOString().split("T")[0];
+  const zipFilter = zipCodes.map((z) => `outlet_zip_code='${z}'`).join(" OR ");
+  const where = `(${zipFilter}) AND outlet_naics_code between 722400 and 722599 AND outlet_permit_issue_date > '${dateFilter}'`;
+  const query = `?$select=taxpayer_name,outlet_name,outlet_address,outlet_city,outlet_zip_code,outlet_naics_code,outlet_permit_issue_date,outlet_first_sales_date&$where=${encodeURIComponent(where)}&$order=outlet_permit_issue_date DESC&$limit=500`;
+
+  try {
+    const res = await fetch(`${SALES_TAX_PERMITS_URL}${query}`);
+    if (!res.ok) return [];
+    const today = new Date();
+    const data = await res.json();
+    return (Array.isArray(data) ? data : [])
+      .filter((item) => {
+        const firstSalesDate = item.outlet_first_sales_date ? new Date(item.outlet_first_sales_date) : null;
+        return !firstSalesDate || firstSalesDate > today;
+      })
+      .map((item) => ({
+        id: `sales-tax-${item.outlet_name || item.taxpayer_name || "unknown"}-${item.outlet_zip_code || ""}`,
+        name: item.outlet_name || item.taxpayer_name || "Unknown",
+        address: item.outlet_address || "",
+        city: item.outlet_city || "",
+        zip: (item.outlet_zip_code || "").substring(0, 5),
+        license_type: "",
+        issue_date: item.outlet_permit_issue_date || "",
+        status: "Pre-opening",
+        source: "Texas Sales-Tax Permit",
+        first_sales_date: item.outlet_first_sales_date || null,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+// Austin's inspection data identifies named establishments on their first recorded
+// health inspection, which provides a strong newly-opened signal.
+async function searchAustinFirstInspections(zipCodes) {
+  const austinZips = zipCodes.filter((z) => z.startsWith("787"));
+  if (austinZips.length === 0) return [];
+
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+  const dateFilter = ninetyDaysAgo.toISOString().split("T")[0];
+
+  try {
+    const responses = await Promise.all(austinZips.map(async (zip) => {
+      const where = `starts_with(zip_code, '${zip}')`;
+      const having = `min(inspection_date) > '${dateFilter}'`;
+      const query = `?$select=facility_id,restaurant_name,address,zip_code,min(inspection_date) as first_inspection&$where=${encodeURIComponent(where)}&$group=facility_id,restaurant_name,address,zip_code&$having=${encodeURIComponent(having)}&$order=first_inspection DESC&$limit=200`;
+      const res = await fetch(`${AUSTIN_INSPECTIONS_URL}${query}`);
+      return res.ok ? res.json() : [];
+    }));
+
+    return responses.flat().map((item) => ({
+      id: `first-inspection-${item.facility_id || `${item.restaurant_name || "unknown"}-${item.zip_code || ""}`}`,
+      name: item.restaurant_name || "Unknown",
+      address: item.address || "",
+      city: "Austin",
+      zip: (item.zip_code || "").substring(0, 5),
+      license_type: "",
+      issue_date: item.first_inspection || "",
+      status: "Newly inspected",
+      source: "Austin First Inspection",
+      facility_id: item.facility_id || "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 // Fetch both approved and pending, merge and deduplicate by name+address
 async function searchZips(zipCodes) {
-  const [approved, pending] = await Promise.all([
+  const [approved, pending, salesTaxPermits, firstInspections] = await Promise.all([
     searchApproved(zipCodes),
     searchPending(zipCodes),
+    searchSalesTaxPermits(zipCodes),
+    searchAustinFirstInspections(zipCodes),
   ]);
 
-  const all = [...pending, ...approved]; // pending first — higher prospecting value
+  const all = [...pending, ...salesTaxPermits, ...firstInspections, ...approved];
 
   // Deduplicate: same name + address combo (case-insensitive)
   const seen = new Set();

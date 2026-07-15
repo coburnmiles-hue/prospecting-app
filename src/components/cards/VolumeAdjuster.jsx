@@ -2,19 +2,23 @@ import { useState, useEffect } from "react";
 import { Utensils, Percent, Lock, Unlock } from "lucide-react";
 import { formatCurrency } from "../../utils/formatters";
 
-export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved, customFoodPct, onCustomFoodPctChange, learnedInfo }) {
+export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, stats, isLocked, onToggleLock, isSaved, customFoodPct, onCustomFoodPctChange, learnedInfo, onLearnedOverrideChange }) {
   const [learnedUnlocked, setLearnedUnlocked] = useState(false);
 
-  // Reset to learned-locked mode whenever the account changes
+  // This component remounts when the selected account changes, so reset only then.
+  // Do not depend on `learnedInfo`: choosing a different venue template can change
+  // that object and previously re-locked the control immediately after unlocking.
   useEffect(() => {
     setLearnedUnlocked(false);
-  }, [learnedInfo]);
+    onLearnedOverrideChange?.(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isLearnedMode = !!learnedInfo && !learnedUnlocked;
 
   const handleLearnedUnlock = () => {
     if (window.confirm('This will override the learned data split and let you choose a venue template manually. Are you sure?')) {
       setLearnedUnlocked(true);
+      onLearnedOverrideChange?.(true);
     }
   };
 
@@ -49,6 +53,7 @@ export default function VolumeAdjuster({ venueTypes, venueType, onVenueChange, s
             onChange={(e) => {
               if (e.target.value === '__learned__') {
                 setLearnedUnlocked(false);
+                onLearnedOverrideChange?.(false);
               } else {
                 onVenueChange(e);
               }

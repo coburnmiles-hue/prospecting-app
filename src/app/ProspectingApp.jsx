@@ -28,6 +28,7 @@ import {
   Mic,
   Navigation,
   Search,
+  SlidersHorizontal,
   Trophy,
   Bookmark,
 } from "lucide-react";
@@ -53,7 +54,6 @@ import AIIntelPanel from "../components/cards/AIIntelPanel";
 import VolumeAdjuster from "../components/cards/VolumeAdjuster";
 import GpvTierPanel from "../components/cards/GpvTierPanel";
 import TerritoryPanel from "../components/cards/TerritoryPanel";
-import PipelineBoard from "../components/cards/PipelineBoard";
 import VisitAlertsPanel from "../components/cards/VisitAlertsPanel";
 import TrendAlertsPanel from "../components/cards/TrendAlertsPanel";
 import AccountComparison from "../components/cards/AccountComparison";
@@ -160,7 +160,10 @@ export default function ProspectingApp() {
   } = useTopLeaders();
 
   // NRO Search (New Retail Opportunities)
-  const [nroSubView, setNroSubView] = useState("search"); // "search" | "territory"
+  const [nroSubView, setNroSubView] = useState("search"); // "search" | "territory" | "radar"
+  const [radarCity, setRadarCity] = useState("");
+  const [radarLoading, setRadarLoading] = useState(false);
+  const [radarResult, setRadarResult] = useState("");
   const [nroSearchTerm, setNroSearchTerm] = useState("");
   const [nroSearchType, setNroSearchType] = useState("city"); // city, county, or zip
   const [nroResults, setNroResults] = useState([]);
@@ -200,6 +203,7 @@ export default function ProspectingApp() {
 
   const [venueType, setVenueType] = useState("casual_dining");
   const [customFoodPct, setCustomFoodPct] = useState("");
+  const [useLearnedGpvSplit, setUseLearnedGpvSplit] = useState(true);
 
   // AI
   const [aiLoading, setAiLoading] = useState(false);
@@ -241,8 +245,8 @@ export default function ProspectingApp() {
   const restaurantMarkersRef = useRef([]);
   const userLocationLayerRef = useRef(null);
   const LABEL_ZOOM_THRESHOLD = 13;
-  const [mapTheme, setMapTheme] = useState("dark"); // "dark" | "light"
-  const [legendOpen, setLegendOpen] = useState(true);
+  const [mapTheme, setMapTheme] = useState("light"); // "dark" | "light"
+  const [legendOpen, setLegendOpen] = useState(false);
   const [gpvTiersOpen, setGpvTiersOpen] = useState(false);
   const [hoursFilterOpen, setHoursFilterOpen] = useState(false);
   const [opportunitiesFilterOpen, setOpportunitiesFilterOpen] = useState(false);
@@ -458,6 +462,34 @@ export default function ProspectingApp() {
           console.warn('Food inspection search error:', err);
         }
       }
+
+      // Search 5: Texas Comptroller Sales-Tax Permit Holders (statewide) — NAICS 722400-722599
+      // Restaurants/bars with a recently-issued permit and no first-sales date = pre-opening signal
+      let salesTaxPermitData = [];
+      try {
+        // NAICS 722400–722599 covers full-service/limited-service restaurants, bars, and food trucks
+        let stxLocationFilter = '';
+        if (nroSearchType === 'city') {
+          const term = nroSearchTerm.trim().replace(/\b\w/g, c => c.toUpperCase());
+          stxLocationFilter = `outlet_city='${term}'`;
+        } else if (nroSearchType === 'county') {
+          // county_code is numeric on this dataset; fall back to city prefix for county-like searches
+          stxLocationFilter = `upper(outlet_city) LIKE '%${nroSearchTerm.trim().toUpperCase().split(' ')[0]}%'`;
+        } else if (nroSearchType === 'zip') {
+          stxLocationFilter = `outlet_zip_code='${nroSearchTerm.trim()}'`;
+        }
+        const stxWhere = `${stxLocationFilter} AND outlet_naics_code between 722400 and 722599 AND outlet_permit_issue_date > '${dateFilter}'`;
+        const stxQuery = `?$select=taxpayer_name,outlet_name,outlet_address,outlet_city,outlet_zip_code,outlet_naics_code,outlet_permit_issue_date,outlet_first_sales_date&$where=${encodeURIComponent(stxWhere)}&$order=outlet_permit_issue_date DESC&$limit=300`;
+        const stxUrl = `https://data.texas.gov/resource/jrea-zgmq.json${stxQuery}`;
+        const stxRes = await fetch(stxUrl);
+        if (stxRes.ok) {
+          salesTaxPermitData = await stxRes.json();
+        } else {
+          console.warn('Sales-tax permit response error:', stxRes.status, await stxRes.text().catch(() => ''));
+        }
+      } catch (err) {
+        console.warn('Sales-tax permit search error:', err);
+      }
       
       // Transform TABC issued license data
       const tabcTransformedPromises = filteredTabc.map(async (item) => {
@@ -608,11 +640,66 @@ export default function ProspectingApp() {
         total_receipts: 0,
       }));
 
+      // Transform TX Sales-Tax Permit data
+      // outlet_first_sales_date in the future (or null) = pre-opening; otherwise already operating
+      const salesTaxTransformedPromises = salesTaxPermitData.map(async (item) => {
+        const firstSalesDate = item.outlet_first_sales_date ? new Date(item.outlet_first_sales_date) : null;
+        const isPreOpening = !firstSalesDate || firstSalesDate > new Date();
+        const transformed = {
+          source: 'TX Sales-Tax Permit',
+          location_name: item.outlet_name || item.taxpayer_name || "Unknown",
+          location_address: item.outlet_address || "",
+          location_city: item.outlet_city || "",
+          location_zip: item.outlet_zip_code || "",
+          naics_code: item.outlet_naics_code || "",
+          permit_issue_date: item.outlet_permit_issue_date || "",
+          first_sales_date: item.outlet_first_sales_date || null,
+          is_pre_opening: isPreOpening,
+          taxpayer_number: `STAX-${(item.outlet_name || item.taxpayer_name || '').replace(/\s+/g, '-').slice(0, 20)}-${(item.outlet_zip_code || '')}`,
+          location_number: "1",
+          has_sales: !isPreOpening,
+          total_receipts: 0,
+        };
+
+        // Cross-check against TABC receipts to see if alcohol sales have started
+        try {
+          const searchName = (item.outlet_name || item.taxpayer_name || "").toUpperCase();
+          const searchCity = (item.outlet_city || "").toUpperCase();
+          if (searchName && searchCity) {
+            const where = buildSocrataWhere(searchName, searchCity);
+            const query = `?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(`${DATE_FIELD} DESC`)}&$limit=6`;
+            const salesRes = await fetch(`${BASE_URL}${query}`);
+            if (salesRes.ok) {
+              const salesData = await salesRes.json();
+              const exactMatch = salesData.filter(row => (row.location_name || '').toUpperCase() === searchName);
+              if (exactMatch.length > 0) {
+                transformed.has_sales = true;
+                transformed.is_pre_opening = false;
+                transformed.total_receipts = Number(exactMatch[0].total_receipts || 0);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Error checking TABC sales for STX permit', item.outlet_name, err);
+        }
+
+        return transformed;
+      });
+
       // Combine results from all sources
       const tabcResults = await Promise.all(tabcTransformedPromises);
       const permitResults = await Promise.all(permitTransformedPromises);
       const pendingResults = await Promise.all(pendingTransformedPromises);
-      const allResults = [...tabcResults, ...permitResults, ...pendingResults, ...inspectionTransformed];
+      const salesTaxResults = await Promise.all(salesTaxTransformedPromises);
+
+      // Deduplicate sales-tax permit results: skip if address already appears in TABC results
+      const tabcAddresses = new Set([...tabcResults, ...pendingResults].map(r => r.location_address.toUpperCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
+      const dedupedStax = salesTaxResults.filter(r => {
+        const addr = (r.location_address || '').toUpperCase().replace(/\s+/g, ' ').trim();
+        return !addr || !tabcAddresses.has(addr);
+      });
+
+      const allResults = [...tabcResults, ...permitResults, ...pendingResults, ...inspectionTransformed, ...dedupedStax];
       
       setNroResults(allResults);
     } catch (err) {
@@ -1194,14 +1281,14 @@ export default function ProspectingApp() {
 
       let baseLayer = null;
       if (MAPBOX_KEY) {
-        baseLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
+        baseLayer = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/light-v10/tiles/{z}/{x}/{y}?access_token=${MAPBOX_KEY}`, {
           tileSize: 512,
           zoomOffset: -1,
           maxZoom: 22,
           attribution: '© Mapbox © OpenStreetMap',
         });
       } else {
-        baseLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        baseLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
           maxZoom: 19,
         });
       }
@@ -3139,7 +3226,7 @@ export default function ProspectingApp() {
     const avgAlc = filtered.length > 0 ? (filtered.reduce((sum, m) => sum + m.total, 0) / filtered.length) : 0;
     const baseCfg = VENUE_TYPES[venueType] || VENUE_TYPES.casual_dining;
     // Use bestLearnedInfo so display and calculation always use the same split
-    const learned = bestLearnedInfo;
+    const learned = useLearnedGpvSplit ? bestLearnedInfo : null;
     const effectiveFoodPct = learned ? learned.learnedFoodPct : baseCfg.foodPct;
     const cfg = { ...baseCfg, foodPct: effectiveFoodPct, alcoholPct: 1 - effectiveFoodPct };
     
@@ -3160,7 +3247,7 @@ export default function ProspectingApp() {
     }
     
     return { avgAlc, estFood, total: avgAlc + estFood, cfg, learnedInfo: learned || null, isActualGpv: false };
-  }, [selectedEstablishment, venueType, customFoodPct, bestLearnedInfo, selectedActiveAccount, wonGpv]);
+  }, [selectedEstablishment, venueType, customFoodPct, bestLearnedInfo, useLearnedGpvSplit, selectedActiveAccount, wonGpv]);
 
   // Auto-select GPV tier based on forecast
   useEffect(() => {
@@ -4131,12 +4218,7 @@ export default function ProspectingApp() {
                 {/* Flag filters */}
                 {(() => {
                   const flags = [
-                    { key: "activeOpp",     label: "Active Opp",     color: "emerald" },
                     { key: "activeAccount", label: "Active Account", color: "indigo"  },
-                    { key: "hotLead",       label: "Hot Lead",       color: "orange"  },
-                    { key: "referral",      label: "Referral",       color: "sky"     },
-                    { key: "strategic",     label: "Strategic",      color: "violet"  },
-                    { key: "closedLost",    label: "Closed Lost",    color: "rose"    },
                   ];
                   const colorMap = {
                     emerald: { on: "bg-emerald-600 text-white border-emerald-500",  off: "bg-slate-800/60 text-slate-400 border-slate-700/50 hover:text-slate-200" },
@@ -4210,6 +4292,16 @@ export default function ProspectingApp() {
                         {territoryUnacknowledgedCount > 9 ? "9+" : territoryUnacknowledgedCount}
                       </span>
                     )}
+                  </button>
+                  <button
+                    onClick={() => setNroSubView("radar")}
+                    className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      nroSubView === "radar"
+                        ? "bg-pink-600 text-white shadow-refined"
+                        : "bg-slate-800/60 text-slate-400 hover:text-slate-200 border border-slate-700/50"
+                    }`}
+                  >
+                    AI Radar
                   </button>
                 </div>
 
@@ -4316,6 +4408,88 @@ export default function ProspectingApp() {
                       }
                     }}
                   />
+                )}
+
+                {/* AI Opening Radar */}
+                {nroSubView === "radar" && (
+                  <div className="bg-gradient-to-br from-pink-600/15 to-pink-600/5 border border-pink-500/30 rounded-3xl p-6 shadow-refined-lg">
+                    <div className="text-[10px] font-black uppercase text-pink-400 tracking-widest mb-1">
+                      AI Opening Radar
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-4">
+                      Gemini + Google Search scans for upcoming restaurant openings
+                    </div>
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        placeholder="CITY (e.g., HOUSTON)"
+                        value={radarCity}
+                        onChange={(e) => setRadarCity(e.target.value.toUpperCase())}
+                        className="w-full bg-[#0F172A] border border-slate-700 px-4 py-3 rounded-xl text-[12px] font-bold placeholder:text-slate-600 focus:border-pink-500 focus:outline-none transition-colors"
+                      />
+                      <button
+                        type="button"
+                        disabled={radarLoading || !radarCity.trim()}
+                        onClick={async () => {
+                          if (!radarCity.trim()) return;
+                          setRadarLoading(true);
+                          setRadarResult("");
+                          try {
+                            const res = await fetch('/api/intel', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: radarCity, city: radarCity, mode: 'area_radar' }),
+                            });
+                            const data = await res.json();
+                            setRadarResult(data.text || data.error || "No results returned.");
+                          } catch (err) {
+                            setRadarResult("Error running AI Radar: " + (err?.message || "Unknown error"));
+                          } finally {
+                            setRadarLoading(false);
+                          }
+                        }}
+                        className="w-full bg-pink-600 hover:bg-pink-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-[11px] uppercase tracking-widest py-3 px-4 rounded-xl transition-all duration-200"
+                      >
+                        {radarLoading ? 'Scanning...' : 'Run Opening Radar'}
+                      </button>
+                      {radarResult && (
+                        <div className="space-y-3">
+                          {radarResult.split("\n").filter(line => line.trim()).map((line, i) => {
+                            // Section header (e.g. "UPCOMING:")
+                            if (/^[A-Z\s]+:$/.test(line.trim())) {
+                              return (
+                                <div key={i} className="flex items-center gap-2 pt-1">
+                                  <span className="text-pink-400 font-black text-[10px] uppercase tracking-widest">{line.trim().replace(/:$/, "")}</span>
+                                  <div className="flex-1 h-px bg-pink-500/20" />
+                                </div>
+                              );
+                            }
+                            // Entry: Name — Description — Address — Date
+                            const parts = line.split(" — ");
+                            const name = parts[0]?.trim();
+                            const description = parts[1]?.trim();
+                            const address = parts[2]?.trim();
+                            const date = parts[3]?.trim();
+                            return (
+                              <div key={i} className="bg-[#0F172A] border border-pink-500/20 rounded-xl p-3 space-y-1.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-white font-black text-[11px] leading-tight">{name}</span>
+                                  {date && <span className="text-pink-400 font-bold text-[10px] whitespace-nowrap shrink-0">{date.replace(/\.$/, "")}</span>}
+                                </div>
+                                {description && <p className="text-slate-300 text-[11px] leading-relaxed">{description}</p>}
+                                {address && (
+                                  <div className="flex items-center gap-1 text-slate-500 text-[10px]">
+                                    <span>📍</span>
+                                    <span>{address}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             ) : (
@@ -4811,6 +4985,11 @@ export default function ProspectingApp() {
                                 NEW OPEN
                               </span>
                             )}
+                            {item.source === 'TX Sales-Tax Permit' && (
+                              <span className={`font-black text-[8px] px-1.5 py-0.5 rounded border whitespace-nowrap ${item.is_pre_opening ? 'text-pink-400 bg-pink-500/10 border-pink-500/30' : 'text-teal-400 bg-teal-500/10 border-teal-500/30'}`}>
+                                {item.is_pre_opening ? 'PRE-OPEN' : 'STX PERMIT'}
+                              </span>
+                            )}
                             {item.has_sales ? (
                               <span className="text-emerald-400 font-black text-xs px-2 py-0.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30 whitespace-nowrap">
                                 {formatCurrency(item.total_receipts)}
@@ -4856,6 +5035,23 @@ export default function ProspectingApp() {
                                 <div className="text-[9px] font-bold text-slate-400">
                                   {new Date(item.first_inspection).toLocaleDateString()}
                                 </div>
+                              </>
+                            ) : item.source === 'TX Sales-Tax Permit' ? (
+                              <>
+                                <div className="text-[9px] font-bold text-pink-400">
+                                  NAICS {item.naics_code}
+                                </div>
+                                <div className="text-[9px] font-bold text-slate-400">
+                                  Permit: {new Date(item.permit_issue_date).toLocaleDateString()}
+                                </div>
+                                {item.first_sales_date && (
+                                  <div className={`text-[9px] font-bold ${item.is_pre_opening ? 'text-pink-300' : 'text-teal-400'}`}>
+                                    {item.is_pre_opening ? `Opens ~${new Date(item.first_sales_date).toLocaleDateString()}` : `Sales from ${new Date(item.first_sales_date).toLocaleDateString()}`}
+                                  </div>
+                                )}
+                                {!item.first_sales_date && (
+                                  <div className="text-[9px] font-bold text-pink-300">No sales date yet</div>
+                                )}
                               </>
                             ) : (
                               <>
@@ -4903,7 +5099,6 @@ export default function ProspectingApp() {
             <div className="flex items-center gap-1.5 bg-[#1E293B] rounded-2xl border border-slate-700 p-1.5 mb-4">
               {[
                 { id: "list", label: "📋 List" },
-                { id: "pipeline", label: "⚡ Pipeline" },
                 { id: "compare", label: "📊 Compare" },
               ].map((tab) => (
                 <button
@@ -4929,16 +5124,6 @@ export default function ProspectingApp() {
                 ↓ CSV
               </button>
             </div>
-          )}
-
-          {/* Pipeline board */}
-          {viewMode === "saved" && savedPanelMode === "pipeline" && (
-            <PipelineBoard
-              savedAccounts={savedAccounts}
-              onAccountClick={(account) => {
-                navigateToAccount(account.id);
-              }}
-            />
           )}
 
           {/* Account comparison chart */}
@@ -5013,8 +5198,9 @@ export default function ProspectingApp() {
             <>
               <div className="bg-[#1E293B] rounded-[2.5rem] border border-slate-700 shadow-2xl overflow-hidden relative min-h-[720px] h-[720px]" style={{ isolation: "isolate" }}>
               
-              {/* Floating search bar */}
-              <div className="absolute top-6 left-6 right-6 z-[1000] flex items-center gap-3 pointer-events-none">
+              {/* Floating search bar + filters */}
+              <div className="absolute top-6 left-6 right-6 z-[1000] pointer-events-none">
+                <div className="flex items-center gap-3">
                 <div className="flex-1 max-w-md relative pointer-events-auto">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                   <input
@@ -5100,20 +5286,22 @@ export default function ProspectingApp() {
                     </div>
                   )}
                 </div>
-                <div className="px-3 py-2 map-glass rounded-xl text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
-                  {restaurantSearchMode ? `${restaurantMarkers.length} RESTAURANTS` : `${savedAccounts.length} PINS`}
-                </div>
-              </div>
-
-              <div className="absolute top-24 right-6 z-50 map-glass rounded-xl p-3 text-xs text-slate-200 max-w-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-black uppercase text-[10px] text-indigo-300">Map Filters</div>
-                  <button onClick={() => setLegendOpen(o => !o)} className="text-[10px] px-2 py-1 rounded-md bg-slate-800/60">
-                    {legendOpen ? 'Hide' : 'Show'}
+                  <button
+                    type="button"
+                    onClick={() => setLegendOpen(o => !o)}
+                    className="pointer-events-auto flex items-center gap-1.5 px-3 py-2.5 map-glass rounded-xl text-[11px] font-black uppercase tracking-widest text-slate-200 hover:text-white transition-all"
+                  >
+                    <SlidersHorizontal size={13} />
+                    Filters
                   </button>
-                </div>
-                <div className={`flex flex-col gap-2 ${legendOpen ? '' : 'hidden'}`}>
+                  <div className="px-3 py-2 map-glass rounded-xl text-[8px] font-black uppercase text-indigo-400 flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>{" "}
+                    {restaurantSearchMode ? `${restaurantMarkers.length} RESTAURANTS` : `${savedAccounts.length} PINS`}
+                  </div>
+                </div>{/* end flex row */}
+                {legendOpen && (
+                  <div className="pointer-events-auto mt-2 map-glass rounded-xl p-3 text-xs text-slate-200 max-w-xs overflow-y-auto max-h-[70vh]">
+                <div className="flex flex-col gap-2">
                   
                   {/* GPV Tiers Collapsible Section */}
                   <div className="border-b border-slate-700 pb-2">
@@ -5380,6 +5568,8 @@ export default function ProspectingApp() {
                 >
                   ⬇ Export Visible Pins CSV
                 </button>
+                  </div>
+                )}
               </div>
 
               <div className="absolute inset-0 bg-[#020617] z-10">
@@ -5866,7 +6056,7 @@ export default function ProspectingApp() {
             </>
           )}
           {selectedEstablishment && !(viewMode === "saved" && savedPanelMode === "compare") && (
-            <div className={viewMode === "map" ? "mt-6 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : (viewMode === "saved" && savedPanelMode === "pipeline") ? "mt-8 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : "space-y-6 animate-in slide-in-from-bottom-4 duration-500"}>
+            <div className={viewMode === "map" ? "mt-6 space-y-6 animate-in slide-in-from-bottom-4 duration-500" : "space-y-6 animate-in slide-in-from-bottom-4 duration-500"}>
               {/* Manual account banner */}
               {(() => {
                 try {
@@ -5976,7 +6166,7 @@ export default function ProspectingApp() {
                             {posLoading ? (
                               <span className="text-[11px] text-slate-500 font-medium italic">Detecting...</span>
                             ) : posSystem?.pos ? (
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                                   {logoUrl && (
                                     <img
@@ -5990,6 +6180,11 @@ export default function ProspectingApp() {
                                   )}
                                   {posSystem.pos}
                                 </span>
+                                {posSystem.comingSoon && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[8px] font-black uppercase bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                                    COMING SOON
+                                  </span>
+                                )}
                                 {posSystem.source && (
                                   posSystem.sourceUrl ? (
                                     <a
@@ -6005,6 +6200,10 @@ export default function ProspectingApp() {
                                   )
                                 )}
                               </div>
+                            ) : posSystem?.comingSoon ? (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                                COMING SOON (website detected)
+                              </span>
                             ) : posSystem ? (
                               <span className="text-[11px] text-slate-500 font-medium italic">Not detected</span>
                             ) : null}
@@ -6180,6 +6379,7 @@ export default function ProspectingApp() {
                   customFoodPct={customFoodPct}
                   onCustomFoodPctChange={(e) => setCustomFoodPct(e.target.value)}
                   learnedInfo={bestLearnedInfo}
+                  onLearnedOverrideChange={(isOverridden) => setUseLearnedGpvSplit(!isOverridden)}
                 />
 
                 <div className="bg-[#1E293B] p-8 rounded-[2.5rem] border border-slate-700">
